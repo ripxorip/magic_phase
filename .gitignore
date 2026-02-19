@@ -1,0 +1,21 @@
+# Output files
+output/
+*.wav
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Nix
+result
+
+# IDE
+.vscode/
+.idea/
+
+# Input files
+input/
+
+.direnv/
+.envrc
