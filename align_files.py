@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 """
-Align two audio files and output comparison.
+Align audio files and output comparison.
 
 Usage:
     python align_files.py reference.wav target.wav [--output-dir ./output]
+    python align_files.py reference.wav target1.wav target2.wav target3.wav -o ./output
 
-Outputs:
+Outputs (single target):
     - aligned.wav          : Phase-corrected target
     - sum_before.wav       : reference + target (hear the comb filtering!)
     - sum_after.wav        : reference + aligned (should be fuller/louder)
-    - comparison.png       : Visual analysis
+    - analysis.png         : Visual analysis
+
+Outputs (multiple targets):
+    - aligned_<name>.wav   : Phase-corrected target per mic
+    - sum_before.wav       : reference + all unaligned targets
+    - sum_after.wav        : reference + all aligned targets
+    - analysis_<name>.png  : Visual analysis per mic
 """
 
 import argparse
@@ -289,138 +296,220 @@ def analyze_and_plot(reference, target, corrected, sr, title="", spectral_info=N
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Align two audio files')
+    parser = argparse.ArgumentParser(description='Align audio files (1 reference + 1 or more targets)')
     parser.add_argument('reference', help='Reference audio file (the "correct" timing)')
-    parser.add_argument('target', help='Target audio file (to be aligned)')
+    parser.add_argument('target', nargs='+', help='Target audio file(s) to be aligned')
     parser.add_argument('--output-dir', '-o', default='./output', help='Output directory')
     parser.add_argument('--max-delay', '-d', type=float, default=50.0,
                         help='Maximum delay to search for (ms)')
-    parser.add_argument('--spectral', '-s', action='store_true',
-                        help='Enable frequency-dependent phase correction (the GOOD STUFF)')
+    parser.add_argument('--no-spectral', action='store_true',
+                        help='Disable frequency-dependent phase correction (time-only mode)')
     parser.add_argument('--bands', '-b', type=int, default=64,
                         help='Number of frequency bands for spectral correction')
     parser.add_argument('--coherence-threshold', '-c', type=float, default=0.4,
                         help='Minimum coherence to apply correction (0-1, higher=safer)')
     parser.add_argument('--max-correction', '-m', type=float, default=120,
                         help='Maximum phase correction in degrees (lower=safer)')
+    parser.add_argument('--gain-match', '-g', action='store_true',
+                        help='Match target RMS level to reference before alignment')
     parser.add_argument('--no-plot', action='store_true', help='Skip showing plot')
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load files
-    print(f"Loading {args.reference}...")
-    ref, sr_ref = sf.read(args.reference)
-    print(f"Loading {args.target}...")
-    tar, sr_tar = sf.read(args.target)
+    multi = len(args.target) > 1
 
-    # Handle stereo -> mono
-    if ref.ndim > 1:
-        print(f"  Reference is {ref.shape[1]}ch, converting to mono")
-        ref = np.mean(ref, axis=1)
-    if tar.ndim > 1:
-        print(f"  Target is {tar.shape[1]}ch, converting to mono")
-        tar = np.mean(tar, axis=1)
-
-    # Check sample rates
-    if sr_ref != sr_tar:
-        print(f"WARNING: Sample rates differ ({sr_ref} vs {sr_tar})")
-        print("Resampling target to match reference...")
-        from scipy.signal import resample
-        tar = resample(tar, int(len(tar) * sr_ref / sr_tar))
+    # Load reference
+    print(f"Loading reference: {args.reference}...")
+    ref_raw, sr_ref = sf.read(args.reference)
+    if ref_raw.ndim > 1:
+        print(f"  Reference is {ref_raw.shape[1]}ch, converting to mono")
+        ref_raw = np.mean(ref_raw, axis=1)
     sr = sr_ref
 
-    # Match lengths
-    min_len = min(len(ref), len(tar))
-    ref = ref[:min_len]
-    tar = tar[:min_len]
-
-    print(f"\nAudio: {min_len/sr:.2f}s @ {sr}Hz")
-
-    # Detect delay
-    print(f"\nDetecting delay (searching +/- {args.max_delay}ms)...")
-    delay_samples, corr, polarity = detect_delay_xcorr(ref, tar, sr, args.max_delay)
-    delay_ms = delay_samples / sr * 1000
-
-    print(f"  Detected delay: {delay_samples} samples ({delay_ms:.3f} ms)")
-    print(f"  Correlation: {corr:.4f}")
-    print(f"  Polarity: {'INVERTED (180°)' if polarity < 0 else 'Normal'}")
-
-    # Apply correction
-    print("\nApplying correction...")
-    corrected = correct_delay_subsample(tar, delay_samples, sr)
-    if polarity < 0:
-        print("  Flipping polarity...")
-        corrected = -corrected
-
-    # Spectral phase correction (the GOOD STUFF!)
-    spectral_info = None
-    if args.spectral:
-        print(f"\n*** SPECTRAL PHASE CORRECTION ***")
-        print(f"  Bands: {args.bands}")
-        print(f"  Coherence threshold: {args.coherence_threshold}")
-        print(f"  Max correction: {args.max_correction}°")
-        print("  Analyzing per-frequency phase differences...")
-
-        corrected, spectral_info = correct_phase_spectral(
-            ref, corrected, sr,
-            n_bands=args.bands,
-            coherence_threshold=args.coherence_threshold,
-            max_correction_deg=args.max_correction
-        )
-
-        freq_bins, phase_corr, coherence = spectral_info
-        print(f"  Phase correction range: {np.min(phase_corr):.2f} to {np.max(phase_corr):.2f} rad")
-        print(f"  Average coherence: {np.mean(coherence):.3f}")
-        print("  Applied frequency-dependent phase correction!")
-
-    # Compute quality metrics
-    corr_before = np.corrcoef(ref, tar)[0, 1]
-    corr_after = np.corrcoef(ref, corrected)[0, 1]
-
-    sum_before = ref + tar
-    sum_after = ref + corrected
-
-    energy_before = np.sum(sum_before**2)
-    energy_after = np.sum(sum_after**2)
-    energy_ref = np.sum(ref**2)
-
-    print(f"\nResults:")
-    print(f"  Correlation: {corr_before:.4f} -> {corr_after:.4f}")
-    print(f"  Sum energy gain: {10*np.log10(energy_after/energy_before):.2f} dB")
-    print(f"  Coherence ratio: {energy_after/(4*energy_ref):.3f} (1.0 = perfect)")
-
-    # Normalize outputs - each file normalized independently to prevent clipping
+    # Normalize helper
     def normalize(sig, headroom_db=-1.0):
         """Normalize to peak with headroom."""
         peak = np.max(np.abs(sig))
         if peak > 0:
-            target = 10 ** (headroom_db / 20)  # -1dB = 0.89
-            return sig * (target / peak)
+            target_level = 10 ** (headroom_db / 20)
+            return sig * (target_level / peak)
         return sig
 
-    # Save files - normalize each independently
-    sf.write(output_dir / 'aligned.wav', normalize(corrected), sr)
+    # Extract short name from filename for labeling
+    def short_name(filepath):
+        """Extract a usable short name from a target filename."""
+        stem = Path(filepath).stem
+        ref_stem = Path(args.reference).stem
+        # Find common prefix length, then back up to last word boundary
+        prefix_len = 0
+        for a, b in zip(ref_stem, stem):
+            if a == b:
+                prefix_len += 1
+            else:
+                break
+        # Back up to the last separator so we keep whole words
+        while prefix_len > 0 and stem[prefix_len - 1] not in '_- ':
+            prefix_len -= 1
+        name = stem[prefix_len:].lstrip('_- ')
+        return name if name else stem
+
+    # Process each target
+    all_unaligned = []
+    all_corrected = []
+    target_names = []
+
+    for target_path in args.target:
+        name = short_name(target_path) if multi else None
+        label = f" [{name}]" if name else ""
+        target_names.append(name)
+
+        print(f"\n{'='*60}")
+        print(f"Processing target{label}: {target_path}")
+        print(f"{'='*60}")
+
+        # Load target
+        tar, sr_tar = sf.read(target_path)
+        if tar.ndim > 1:
+            print(f"  Target is {tar.shape[1]}ch, converting to mono")
+            tar = np.mean(tar, axis=1)
+
+        # Resample if needed
+        if sr_tar != sr:
+            print(f"WARNING: Sample rate differs ({sr} vs {sr_tar})")
+            print("Resampling target to match reference...")
+            from scipy.signal import resample
+            tar = resample(tar, int(len(tar) * sr / sr_tar))
+
+        # Match lengths
+        ref = ref_raw.copy()
+        min_len = min(len(ref), len(tar))
+        ref = ref[:min_len]
+        tar = tar[:min_len]
+
+        print(f"  Audio: {min_len/sr:.2f}s @ {sr}Hz")
+
+        # Gain match target to reference RMS
+        if args.gain_match:
+            rms_ref = np.sqrt(np.mean(ref**2))
+            rms_tar = np.sqrt(np.mean(tar**2))
+            if rms_tar > 0:
+                gain = rms_ref / rms_tar
+                tar = tar * gain
+                print(f"  Gain matched: {20*np.log10(gain):+.1f} dB applied to target")
+
+        # Detect delay
+        print(f"\n  Detecting delay (searching +/- {args.max_delay}ms)...")
+        delay_samples, corr, polarity = detect_delay_xcorr(ref, tar, sr, args.max_delay)
+        delay_ms = delay_samples / sr * 1000
+
+        print(f"  Detected delay: {delay_samples} samples ({delay_ms:.3f} ms)")
+        print(f"  Correlation: {corr:.4f}")
+        print(f"  Polarity: {'INVERTED (180°)' if polarity < 0 else 'Normal'}")
+
+        # Apply correction
+        print("  Applying correction...")
+        corrected = correct_delay_subsample(tar, delay_samples, sr)
+        if polarity < 0:
+            print("  Flipping polarity...")
+            corrected = -corrected
+
+        # Spectral phase correction
+        spectral_info = None
+        if not args.no_spectral:
+            print(f"\n  *** SPECTRAL PHASE CORRECTION ***")
+            print(f"    Bands: {args.bands}")
+            print(f"    Coherence threshold: {args.coherence_threshold}")
+            print(f"    Max correction: {args.max_correction}°")
+            print("    Analyzing per-frequency phase differences...")
+
+            corrected, spectral_info = correct_phase_spectral(
+                ref, corrected, sr,
+                n_bands=args.bands,
+                coherence_threshold=args.coherence_threshold,
+                max_correction_deg=args.max_correction
+            )
+
+            freq_bins, phase_corr, coherence = spectral_info
+            print(f"    Phase correction range: {np.min(phase_corr):.2f} to {np.max(phase_corr):.2f} rad")
+            print(f"    Average coherence: {np.mean(coherence):.3f}")
+            print("    Applied frequency-dependent phase correction!")
+
+        # Quality metrics
+        corr_before = np.corrcoef(ref, tar)[0, 1]
+        corr_after = np.corrcoef(ref, corrected)[0, 1]
+
+        sum_before_pair = ref + tar
+        sum_after_pair = ref + corrected
+        energy_before = np.sum(sum_before_pair**2)
+        energy_after = np.sum(sum_after_pair**2)
+        energy_ref = np.sum(ref**2)
+
+        print(f"\n  Results{label}:")
+        print(f"    Correlation: {corr_before:.4f} -> {corr_after:.4f}")
+        print(f"    Sum energy gain: {10*np.log10(energy_after/energy_before):.2f} dB")
+        print(f"    Coherence ratio: {energy_after/(4*energy_ref):.3f} (1.0 = perfect)")
+
+        # Collect for combined sums
+        all_unaligned.append(tar)
+        all_corrected.append(corrected)
+
+        # Per-target output files
+        suffix = f"_{name}" if multi else ""
+        correction_type = "Time + Spectral corrected" if not args.no_spectral else "Time corrected"
+
+        sf.write(output_dir / f'unaligned{suffix}.wav', normalize(tar), sr)
+        sf.write(output_dir / f'aligned{suffix}.wav', normalize(corrected), sr)
+
+        if multi:
+            sf.write(output_dir / f'aligned{suffix}_mix.wav', normalize(corrected, -6), sr)
+
+        # Per-target analysis plot
+        title = f"Phase Alignment{label}" + (" + SPECTRAL" if not args.no_spectral else "")
+        fig = analyze_and_plot(ref, tar, corrected, sr, title, spectral_info)
+        fig.savefig(output_dir / f'analysis{suffix}.png', dpi=150)
+        plt.close(fig)
+
+    # --- Combined outputs ---
+    # Use the shortest common length for summing
+    min_common = min(len(s) for s in all_unaligned)
+    ref_common = ref_raw[:min_common]
+
+    sum_before = ref_common.copy()
+    sum_after = ref_common.copy()
+    for u, c in zip(all_unaligned, all_corrected):
+        sum_before += u[:min_common]
+        sum_after += c[:min_common]
+
+    sf.write(output_dir / 'ref_mono.wav', normalize(ref_common), sr)
     sf.write(output_dir / 'sum_before.wav', normalize(sum_before), sr)
     sf.write(output_dir / 'sum_after.wav', normalize(sum_after), sr)
 
-    # Also output reference and aligned at -6dB for easy mixing/comparison
-    sf.write(output_dir / 'ref_mix.wav', normalize(ref, -6), sr)
-    sf.write(output_dir / 'aligned_mix.wav', normalize(corrected, -6), sr)
-    print(f"\nSaved to {output_dir}/:")
-    correction_type = "Time + Spectral corrected" if args.spectral else "Time corrected"
-    print(f"  aligned.wav      - {correction_type} target (normalized to -1dB)")
-    print(f"  sum_before.wav   - ref + target (LISTEN FOR COMB FILTERING)")
-    print(f"  sum_after.wav    - ref + aligned (should sound fuller)")
-    print(f"  ref_mix.wav      - reference at -6dB (for mixing)")
-    print(f"  aligned_mix.wav  - aligned at -6dB (for mixing)")
+    if not multi:
+        # Single-target: also write the mix files for backward compat
+        sf.write(output_dir / 'ref_mix.wav', normalize(ref_common, -6), sr)
+        sf.write(output_dir / 'aligned_mix.wav', normalize(all_corrected[0], -6), sr)
 
-    # Plot
-    title = "Phase Alignment Analysis" + (" + SPECTRAL" if args.spectral else "")
-    fig = analyze_and_plot(ref, tar, corrected, sr, title, spectral_info)
-    fig.savefig(output_dir / 'analysis.png', dpi=150)
-    print(f"  analysis.png    - Visual analysis")
+    # Print saved files summary
+    correction_type = "Time + Spectral corrected" if not args.no_spectral else "Time corrected"
+    print(f"\n{'='*60}")
+    print(f"Saved to {output_dir}/:")
+    print(f"  ref_mono.wav     - Reference (mono, normalized to -1dB)")
+    if multi:
+        for name in target_names:
+            print(f"  unaligned_{name}.wav  - Original {name} (mono)")
+            print(f"  aligned_{name}.wav   - {correction_type} {name}")
+            print(f"  aligned_{name}_mix.wav - {name} at -6dB (for mixing)")
+            print(f"  analysis_{name}.png  - Visual analysis for {name}")
+    else:
+        print(f"  unaligned.wav    - Original target (mono, normalized to -1dB)")
+        print(f"  aligned.wav      - {correction_type} target (normalized to -1dB)")
+        print(f"  ref_mix.wav      - reference at -6dB (for mixing)")
+        print(f"  aligned_mix.wav  - aligned at -6dB (for mixing)")
+        print(f"  analysis.png     - Visual analysis")
+    print(f"  sum_before.wav   - ref + all targets (LISTEN FOR COMB FILTERING)")
+    print(f"  sum_after.wav    - ref + all aligned (should sound fuller)")
 
     if not args.no_plot:
         plt.show()

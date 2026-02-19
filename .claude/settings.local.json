@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m venv:*)",
+      "Bash(.venv/Scripts/python.exe -m pip install:*)",
+      "Bash(dir:*)",
+      "Bash(echo:*)",
+      "Bash(C:/dev/magic_phase/.venv/Scripts/python.exe:*)",
+      "Bash(python:*)",
+      "Bash(./venv/Scripts/python:*)",
+      "Bash(ls:*)"
+    ]
+  }
+}
