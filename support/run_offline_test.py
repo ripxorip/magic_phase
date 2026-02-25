@@ -132,7 +132,7 @@ def load_csv_stats(csv_path):
     }
 
 
-def run_pair(name, ref_path, tar_path, output_base, skip_python=False, skip_cpp=False):
+def run_pair(name, ref_path, tar_path, output_base, skip_python=False, skip_cpp=False, analyze_window=None):
     """Run both Python and C++ on a single ref/target pair."""
     pair_dir = output_base / name
     cpp_dir = pair_dir / "cpp"
@@ -160,7 +160,10 @@ def run_pair(name, ref_path, tar_path, output_base, skip_python=False, skip_cpp=
             print(f"  Build with: nix develop --command bash -c "
                   f"\"cmake -B build -DMP_BUILD_CLI_TEST=ON && cmake --build build --target MagicPhaseTest\"")
         else:
-            r = run_cmd([str(CPP_BIN), str(ref_abs), str(tar_abs), "-o", str(cpp_dir)], "C++")
+            cmd = [str(CPP_BIN), str(ref_abs), str(tar_abs), "-o", str(cpp_dir)]
+            if analyze_window is not None:
+                cmd.extend(["-w", str(analyze_window)])
+            r = run_cmd(cmd, "C++")
             cpp_metrics = parse_cpp_stdout(r.stdout)
             csv_stats = load_csv_stats(cpp_dir / "analysis.csv")
             cpp_metrics.update(csv_stats)
@@ -169,12 +172,15 @@ def run_pair(name, ref_path, tar_path, output_base, skip_python=False, skip_cpp=
     # ── Run Python ──
     py_metrics = {}
     if not skip_python:
-        r = run_cmd([
+        cmd = [
             sys.executable, str(PY_ALIGN),
             str(ref_abs), str(tar_abs),
             "-o", str(py_dir),
             "--no-plot",
-        ], "Python")
+        ]
+        if analyze_window is not None:
+            cmd.extend(["--analyze-window", str(analyze_window)])
+        r = run_cmd(cmd, "Python")
         py_metrics = parse_python_stdout(r.stdout)
     result['python'] = py_metrics
 
@@ -349,6 +355,9 @@ def main():
                         help='Only run Python (skip C++)')
     parser.add_argument('--output', '-o', type=Path, default=OUTPUT_BASE,
                         help=f'Output base directory (default: {OUTPUT_BASE.relative_to(ROOT)})')
+    parser.add_argument('--analyze-window', '-w', type=float, default=7.5,
+                        help='Analyze window in seconds (default: 7.5, VST-like behavior). '
+                             'Passed to both C++ and Python tools.')
     args = parser.parse_args()
 
     output_base = args.output
@@ -384,7 +393,8 @@ def main():
 
         r = run_pair(name, ref, tar, output_base,
                      skip_python=args.cpp_only,
-                     skip_cpp=args.python_only)
+                     skip_cpp=args.python_only,
+                     analyze_window=args.analyze_window)
         results.append(r)
 
     # ── Summary ──

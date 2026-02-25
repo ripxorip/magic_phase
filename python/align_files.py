@@ -81,9 +81,140 @@ def detect_phase_spectral(reference, target, sr, n_fft=4096):
     return f, avg_phase_diff
 
 
+def analyze_phase_spectral(reference, target, sr, n_fft=4096, n_bands=64,
+                            low_freq=20, high_freq=20000,
+                            coherence_threshold=0.4, max_correction_deg=120):
+    """
+    Analyze per-frequency phase differences between reference and target.
+
+    This computes the phase correction curve WITHOUT applying it.
+    Use apply_phase_spectral() to apply the computed correction.
+
+    Parameters:
+        reference: Reference signal
+        target: Target signal (should already be time-corrected)
+        sr: Sample rate
+        n_fft: FFT size for STFT analysis
+        n_bands: Number of frequency bands for smoothed correction
+        low_freq: Lowest frequency to correct (Hz)
+        high_freq: Highest frequency to correct (Hz)
+        coherence_threshold: Minimum coherence to apply correction (0-1)
+        max_correction_deg: Maximum phase correction in degrees
+
+    Returns:
+        f: Frequency bins
+        phase_correction: Per-bin phase correction in radians
+        coherence: Per-bin coherence values
+    """
+    from scipy.ndimage import gaussian_filter1d
+
+    hop_length = n_fft // 4
+    window = signal.windows.hann(n_fft)
+
+    # STFT of both signals
+    f, t_frames, Zref = signal.stft(reference, sr, window=window, nperseg=n_fft,
+                                     noverlap=n_fft-hop_length)
+    _, _, Ztar = signal.stft(target, sr, window=window, nperseg=n_fft,
+                              noverlap=n_fft-hop_length)
+
+    # Calculate phase difference per bin, per frame
+    phase_diff = np.angle(Ztar * np.conj(Zref))
+
+    # Weight by coherence
+    magnitude_product = np.abs(Zref) * np.abs(Ztar)
+
+    # Compute weighted circular mean of phase difference per frequency bin
+    weighted_complex = magnitude_product * np.exp(1j * phase_diff)
+    avg_complex = np.sum(weighted_complex, axis=1)
+    avg_phase_diff = np.angle(avg_complex)
+
+    # Compute coherence
+    coherence = np.abs(avg_complex) / (np.sum(magnitude_product, axis=1) + 1e-10)
+
+    # Create smoothed phase correction curve using frequency bands
+    band_edges = np.logspace(np.log10(max(low_freq, 1)),
+                              np.log10(min(high_freq, sr/2)),
+                              n_bands + 1)
+
+    smoothed_phase = np.zeros_like(avg_phase_diff)
+    smoothed_coherence = np.zeros_like(coherence)
+
+    for i in range(n_bands):
+        mask = (f >= band_edges[i]) & (f < band_edges[i+1])
+        if np.any(mask):
+            band_coherence = coherence[mask]
+            band_phase = avg_phase_diff[mask]
+
+            weights = band_coherence ** 2
+            if np.sum(weights) > 1e-10:
+                weighted_complex_band = weights * np.exp(1j * band_phase)
+                band_avg_phase = np.angle(np.sum(weighted_complex_band))
+                band_avg_coherence = np.mean(band_coherence)
+            else:
+                band_avg_phase = 0
+                band_avg_coherence = 0
+
+            smoothed_phase[mask] = band_avg_phase
+            smoothed_coherence[mask] = band_avg_coherence
+
+    phase_correction = smoothed_phase
+
+    # Apply coherence-weighted correction
+    confidence = np.clip((smoothed_coherence - coherence_threshold) / (1 - coherence_threshold), 0, 1)
+    confidence = gaussian_filter1d(confidence, sigma=3)
+
+    phase_correction = phase_correction * confidence
+
+    # Limit maximum correction
+    max_correction_rad = np.deg2rad(max_correction_deg)
+    phase_correction = np.clip(phase_correction, -max_correction_rad, max_correction_rad)
+
+    # Smooth final curve
+    phase_correction = gaussian_filter1d(phase_correction, sigma=2)
+
+    return f, phase_correction, smoothed_coherence
+
+
+def apply_phase_spectral(target, phase_correction, sr, n_fft=4096):
+    """
+    Apply pre-computed phase correction to a signal.
+
+    Parameters:
+        target: Signal to correct
+        phase_correction: Per-bin phase correction in radians (from analyze_phase_spectral)
+        sr: Sample rate
+        n_fft: FFT size (must match analysis)
+
+    Returns:
+        corrected: Phase-corrected signal
+    """
+    hop_length = n_fft // 4
+    window = signal.windows.hann(n_fft)
+
+    _, _, Ztar = signal.stft(target, sr, window=window, nperseg=n_fft,
+                              noverlap=n_fft-hop_length)
+
+    # Apply correction to each frame
+    correction_matrix = np.exp(-1j * phase_correction[:, np.newaxis])
+    Zcorrected = Ztar * correction_matrix
+
+    # Inverse STFT
+    _, corrected = signal.istft(Zcorrected, sr, window=window, nperseg=n_fft,
+                                 noverlap=n_fft-hop_length)
+
+    # Match length
+    if len(corrected) > len(target):
+        corrected = corrected[:len(target)]
+    elif len(corrected) < len(target):
+        corrected = np.pad(corrected, (0, len(target) - len(corrected)))
+
+    return corrected
+
+
 def correct_phase_spectral(reference, target, sr, n_fft=4096, n_bands=64,
                            low_freq=20, high_freq=20000, smoothing=0.5,
-                           coherence_threshold=0.4, max_correction_deg=120):
+                           coherence_threshold=0.4, max_correction_deg=120,
+                           ref_analyze=None, target_analyze=None):
     """
     Frequency-dependent phase correction using STFT.
 
@@ -100,96 +231,28 @@ def correct_phase_spectral(reference, target, sr, n_fft=4096, n_bands=64,
         smoothing: Smoothing factor (0=none, 1=heavy)
         coherence_threshold: Minimum coherence to apply correction (0-1)
         max_correction_deg: Maximum phase correction in degrees (limits artifacts)
+        ref_analyze: Optional shorter reference for analysis (VST-like window)
+        target_analyze: Optional shorter target for analysis (VST-like window)
 
     Returns:
         corrected: Phase-corrected signal
         phase_correction: The phase correction applied per frequency
     """
-    hop_length = n_fft // 4
-    window = signal.windows.hann(n_fft)
+    # Use analyze windows if provided (VST-like behavior)
+    ref_for_analysis = ref_analyze if ref_analyze is not None else reference
+    tar_for_analysis = target_analyze if target_analyze is not None else target
 
-    # STFT of both signals
-    f, t_frames, Zref = signal.stft(reference, sr, window=window, nperseg=n_fft,
-                                     noverlap=n_fft-hop_length)
-    _, _, Ztar = signal.stft(target, sr, window=window, nperseg=n_fft,
-                              noverlap=n_fft-hop_length)
+    # Analyze phase on the analysis window
+    f, phase_correction, smoothed_coherence = analyze_phase_spectral(
+        ref_for_analysis, tar_for_analysis, sr,
+        n_fft=n_fft, n_bands=n_bands,
+        low_freq=low_freq, high_freq=high_freq,
+        coherence_threshold=coherence_threshold,
+        max_correction_deg=max_correction_deg
+    )
 
-    # Calculate phase difference per bin, per frame
-    phase_diff = np.angle(Ztar * np.conj(Zref))  # More stable than angle(Ztar) - angle(Zref)
-
-    # Weight by coherence (how consistent is the phase relationship?)
-    # High coherence = reliable phase estimate
-    magnitude_product = np.abs(Zref) * np.abs(Ztar)
-
-    # Compute weighted circular mean of phase difference per frequency bin
-    # Using complex averaging for proper circular statistics
-    weighted_complex = magnitude_product * np.exp(1j * phase_diff)
-    avg_complex = np.sum(weighted_complex, axis=1)
-    avg_phase_diff = np.angle(avg_complex)
-
-    # Compute coherence (magnitude of averaged complex = consistency)
-    coherence = np.abs(avg_complex) / (np.sum(magnitude_product, axis=1) + 1e-10)
-
-    # Create smoothed phase correction curve using frequency bands
-    # This prevents noisy corrections in areas with low signal
-    band_edges = np.logspace(np.log10(max(low_freq, 1)),
-                              np.log10(min(high_freq, sr/2)),
-                              n_bands + 1)
-
-    smoothed_phase = np.zeros_like(avg_phase_diff)
-    smoothed_coherence = np.zeros_like(coherence)
-
-    for i in range(n_bands):
-        mask = (f >= band_edges[i]) & (f < band_edges[i+1])
-        if np.any(mask):
-            band_coherence = coherence[mask]
-            band_phase = avg_phase_diff[mask]
-
-            # Weight by coherence within each band
-            weights = band_coherence ** 2  # Square to emphasize high-coherence bins
-            if np.sum(weights) > 1e-10:
-                # Circular weighted mean
-                weighted_complex_band = weights * np.exp(1j * band_phase)
-                band_avg_phase = np.angle(np.sum(weighted_complex_band))
-                band_avg_coherence = np.mean(band_coherence)
-            else:
-                band_avg_phase = 0
-                band_avg_coherence = 0
-
-            smoothed_phase[mask] = band_avg_phase
-            smoothed_coherence[mask] = band_avg_coherence
-
-    # Always use smoothed for stability (raw per-bin is too noisy)
-    phase_correction = smoothed_phase
-
-    # Apply coherence-weighted correction (don't correct where we're uncertain)
-    confidence = np.clip((smoothed_coherence - coherence_threshold) / (1 - coherence_threshold), 0, 1)
-    # Smooth the confidence curve to avoid sudden jumps
-    from scipy.ndimage import gaussian_filter1d
-    confidence = gaussian_filter1d(confidence, sigma=3)
-
-    phase_correction = phase_correction * confidence
-
-    # Limit maximum correction to prevent artifacts
-    max_correction_rad = np.deg2rad(max_correction_deg)
-    phase_correction = np.clip(phase_correction, -max_correction_rad, max_correction_rad)
-
-    # Smooth the final phase correction curve to prevent discontinuities
-    phase_correction = gaussian_filter1d(phase_correction, sigma=2)
-
-    # Apply the correction to each STFT frame
-    correction_matrix = np.exp(-1j * phase_correction[:, np.newaxis])
-    Zcorrected = Ztar * correction_matrix
-
-    # Inverse STFT
-    _, corrected = signal.istft(Zcorrected, sr, window=window, nperseg=n_fft,
-                                 noverlap=n_fft-hop_length)
-
-    # Match length to original
-    if len(corrected) > len(target):
-        corrected = corrected[:len(target)]
-    elif len(corrected) < len(target):
-        corrected = np.pad(corrected, (0, len(target) - len(corrected)))
+    # Apply correction to the FULL target
+    corrected = apply_phase_spectral(target, phase_correction, sr, n_fft=n_fft)
 
     return corrected, (f, phase_correction, smoothed_coherence)
 
@@ -313,6 +376,10 @@ def main():
     parser.add_argument('--gain-match', '-g', action='store_true',
                         help='Match target RMS level to reference before alignment')
     parser.add_argument('--no-plot', action='store_true', help='Skip showing plot')
+    parser.add_argument('--analyze-window', '-w', type=float, default=None,
+                        help='Analyze window in seconds (VST-like behavior). '
+                             'If set, only this much audio is used for analysis, '
+                             'but correction is applied to full file.')
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -390,6 +457,18 @@ def main():
 
         print(f"  Audio: {min_len/sr:.2f}s @ {sr}Hz")
 
+        # Determine analyze window (VST-like behavior)
+        if args.analyze_window is not None:
+            analyze_samples = int(args.analyze_window * sr)
+            analyze_samples = min(analyze_samples, min_len)
+            print(f"  Analyze window: {args.analyze_window}s ({analyze_samples} samples)")
+        else:
+            analyze_samples = min_len
+
+        # Extract analysis portions (used for detection only)
+        ref_analyze = ref[:analyze_samples]
+        tar_analyze = tar[:analyze_samples]
+
         # Gain match target to reference RMS
         if args.gain_match:
             rms_ref = np.sqrt(np.mean(ref**2))
@@ -399,21 +478,26 @@ def main():
                 tar = tar * gain
                 print(f"  Gain matched: {20*np.log10(gain):+.1f} dB applied to target")
 
-        # Detect delay
+        # Detect delay (using analyze window only)
         print(f"\n  Detecting delay (searching +/- {args.max_delay}ms)...")
-        delay_samples, corr, polarity = detect_delay_xcorr(ref, tar, sr, args.max_delay)
+        delay_samples, corr, polarity = detect_delay_xcorr(ref_analyze, tar_analyze, sr, args.max_delay)
         delay_ms = delay_samples / sr * 1000
 
         print(f"  Detected delay: {delay_samples} samples ({delay_ms:.3f} ms)")
         print(f"  Correlation: {corr:.4f}")
         print(f"  Polarity: {'INVERTED (180°)' if polarity < 0 else 'Normal'}")
 
-        # Apply correction
+        # Apply correction (to full target)
         print("  Applying correction...")
         corrected = correct_delay_subsample(tar, delay_samples, sr)
         if polarity < 0:
             print("  Flipping polarity...")
             corrected = -corrected
+
+        # Also create time-corrected version of analyze window for spectral analysis
+        corrected_analyze = correct_delay_subsample(tar_analyze, delay_samples, sr)
+        if polarity < 0:
+            corrected_analyze = -corrected_analyze
 
         # Spectral phase correction
         spectral_info = None
@@ -428,7 +512,9 @@ def main():
                 ref, corrected, sr,
                 n_bands=args.bands,
                 coherence_threshold=args.coherence_threshold,
-                max_correction_deg=args.max_correction
+                max_correction_deg=args.max_correction,
+                ref_analyze=ref_analyze,
+                target_analyze=corrected_analyze
             )
 
             freq_bins, phase_corr, coherence = spectral_info
