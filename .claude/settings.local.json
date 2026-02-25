@@ -8,7 +8,10 @@
       "Bash(C:/dev/magic_phase/.venv/Scripts/python.exe:*)",
       "Bash(python:*)",
       "Bash(./venv/Scripts/python:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(git -C /home/ripxorip/dev/migic/contrib/JUCE log --oneline -1)",
+      "Bash(git -C contrib/JUCE rev-parse HEAD)"
     ]
   }
 }

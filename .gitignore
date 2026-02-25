@@ -17,5 +17,8 @@ result
 # Input files
 input/
 
+# Build
+build/
+
 .direnv/
 .envrc

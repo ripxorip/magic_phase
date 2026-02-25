@@ -1,64 +1,78 @@
 {
-  description = "Phase Alignment Lab - DSP prototyping environment";
+  description = "Magic Phase - Spectral Phase Alignment Plugin";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/25.05";
     flake-utils.url = "github:numtide/flake-utils";
-  };
-
-  nixConfig = {
-    extra-substituters = [ "https://cache.nixos.org" ];
   };
 
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        unfree = import nixpkgs {
-          inherit system;
-          config.allowUnfree = true;
-        };
-        python = pkgs.python312;
-        pythonPackages = python.pkgs;
       in
       {
-        # Easy access: nix run .#claude
-        apps.claude = {
-          type = "app";
-          program = "${unfree.claude-code}/bin/claude";
-        };
-
         devShells.default = pkgs.mkShell {
-          buildInputs = [
-            python
-            pythonPackages.numpy
-            pythonPackages.scipy
-            pythonPackages.matplotlib
-            pythonPackages.soundfile
-            pythonPackages.librosa
-            pythonPackages.ipython
-            pythonPackages.jupyter
+          buildInputs = with pkgs; [
+            freetype
+            alsa-lib
+            webkitgtk
+            curl
+            gtk3
+            jack2
+            xorg.libX11
+            xorg.libX11.dev
+            xorg.libXext
+            xorg.libXinerama
+            xorg.xrandr
+            xorg.libXcursor
 
-            # For audio playback
-            pkgs.portaudio
-            pythonPackages.sounddevice
+            pcre2
+            pcre
+            libuuid
+            libselinux
+            libsepol
+            libthai
+            libdatrie
+            libpsl
+            xorg.libXdmcp
+            libxkbcommon
+            libepoxy
+            xorg.libXtst
+            libsysprof-capture
+            sqlite.dev
 
-            # Claude Code CLI
-            unfree.claude-code
+            # Python prototypes
+            (python3.withPackages (ps: with ps; [
+              numpy
+              scipy
+              matplotlib
+              soundfile
+            ]))
           ];
 
+          nativeBuildInputs = with pkgs; [
+            cmake
+            pkg-config
+            gnumake
+            patchelf
+            gdb
+          ];
+
+          NIX_LDFLAGS = toString [
+            "-lX11"
+            "-lXext"
+            "-lXcursor"
+            "-lXinerama"
+            "-lXrandr"
+          ];
+
+          hardeningDisable = [ "fortify" ];
+
           shellHook = ''
-            echo "Phase Alignment Lab"
-            echo "==================="
-            echo "Available tools:"
-            echo "  - numpy, scipy: DSP fundamentals"
-            echo "  - librosa: Audio analysis"
-            echo "  - soundfile: WAV I/O"
-            echo "  - matplotlib: Visualization"
-            echo "  - sounddevice: Audio playback"
-            echo "  - claude: Claude Code CLI"
-            echo ""
-            echo "Run: python phase_align.py"
+            export CMAKE_BUILD_PARALLEL_LEVEL=$(nproc)
+            echo "Magic Phase development environment"
+            echo "Build parallelism: $CMAKE_BUILD_PARALLEL_LEVEL cores"
           '';
         };
       });
