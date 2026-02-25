@@ -1,14 +1,21 @@
 #pragma once
+#include "PlatformSharedMemory.h"
 #include <juce_core/juce_core.h>
 #include <complex>
 #include <vector>
 #include <atomic>
 #include <cstdint>
 
+// Magic cookie to detect corrupted/incompatible shared memory
+static constexpr uint32_t kMagicCookie = 0x4D475048;  // "MGPH"
+static constexpr uint32_t kLayoutVersion = 1;
+
 // Shared memory layout for inter-instance communication
 struct SharedHeader
 {
-    std::atomic<uint32_t> version { 0 };
+    uint32_t magic { 0 };                              // Must be kMagicCookie
+    uint32_t layoutVersion { 0 };                      // Must match kLayoutVersion
+    std::atomic<uint32_t> version { 0 };               // Change counter for GUI polling
     std::atomic<uint32_t> numInstances { 0 };
     std::atomic<int32_t> referenceSlot { -1 };
     uint32_t sampleRate { 44100 };
@@ -16,8 +23,8 @@ struct SharedHeader
 
 struct InstanceSlot
 {
-    std::atomic<uint32_t> active { 0 };      // 0=free, 1=active, 2=aligned
-    std::atomic<uint32_t> heartbeat { 0 };
+    std::atomic<uint32_t> active { 0 };           // 0=free, 1=active, 2=aligned
+    std::atomic<uint64_t> heartbeatMs { 0 };      // Timestamp in milliseconds
     char trackName[64] {};
     uint32_t instanceId { 0 };
     float delaySamples { 0.0f };
@@ -86,15 +93,19 @@ public:
     const InstanceSlot* getSlot (int index) const;
     int getNumActiveInstances() const;
 
-    bool isInitialized() const { return shmPtr != nullptr; }
+    bool isInitialized() const { return shm_.isOpen(); }
 
 private:
     static constexpr const char* kShmName = "/magic_phase";
     static constexpr size_t kShmSize = sizeof (SharedMemoryLayout);
+    static constexpr uint64_t kHeartbeatTimeoutMs = 2000;  // 2 seconds
 
-    int shmFd = -1;
-    void* shmPtr = nullptr;
+    PlatformSharedMemory shm_;
     SharedMemoryLayout* layout = nullptr;
+
+    void initializeLayout();
+    bool validateLayout() const;
+    uint64_t getCurrentTimeMs() const;
 
     static std::atomic<uint32_t> nextInstanceId;
 };

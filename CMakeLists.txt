@@ -56,6 +56,13 @@ set(MP_SOURCES
     src/GUI/LookAndFeel.cpp
 )
 
+# Platform-specific shared memory implementation
+if(WIN32)
+    list(APPEND MP_SOURCES src/IPC/PlatformSharedMemory_win32.cpp)
+else()
+    list(APPEND MP_SOURCES src/IPC/PlatformSharedMemory_posix.cpp)
+endif()
+
 # Plugin configuration
 juce_add_plugin(MagicPhase
     VERSION ${PROJECT_VERSION}

@@ -1,12 +1,6 @@
 #include "SharedState.h"
 #include <cstring>
-
-#if defined(__linux__) || defined(__APPLE__)
-  #include <sys/mman.h>
-  #include <sys/stat.h>
-  #include <fcntl.h>
-  #include <unistd.h>
-#endif
+#include <chrono>
 
 std::atomic<uint32_t> SharedState::nextInstanceId { 1 };
 
@@ -19,63 +13,86 @@ SharedState::~SharedState()
 
 bool SharedState::initialize()
 {
-#if defined(__linux__) || defined(__APPLE__)
-    // Try to create or open existing shared memory
-    shmFd = shm_open (kShmName, O_CREAT | O_RDWR, 0666);
-    if (shmFd < 0)
+    bool createdNew = false;
+    if (! shm_.open (kShmName, kShmSize, createdNew))
         return false;
 
-    // Set size (only affects if newly created)
-    if (ftruncate (shmFd, static_cast<off_t> (kShmSize)) != 0)
+    layout = reinterpret_cast<SharedMemoryLayout*> (shm_.data());
+
+    if (createdNew)
     {
-        close (shmFd);
-        shmFd = -1;
-        return false;
+        // We created fresh shared memory - initialize it
+        initializeLayout();
+    }
+    else
+    {
+        // Existing shared memory - validate it
+        if (! validateLayout())
+        {
+            // Incompatible layout - reinitialize
+            // This handles version upgrades and corruption
+            initializeLayout();
+        }
     }
 
-    shmPtr = mmap (nullptr, kShmSize, PROT_READ | PROT_WRITE, MAP_SHARED, shmFd, 0);
-    if (shmPtr == MAP_FAILED)
-    {
-        shmPtr = nullptr;
-        close (shmFd);
-        shmFd = -1;
-        return false;
-    }
-
-    layout = reinterpret_cast<SharedMemoryLayout*> (shmPtr);
-
-    // Clean up any stale instances
+    // Clean up any stale instances from crashed plugins
     cleanupStaleInstances();
 
     return true;
-#else
-    // Windows: would use CreateFileMapping/MapViewOfFile
-    return false;
-#endif
+}
+
+void SharedState::initializeLayout()
+{
+    // Zero everything first
+    std::memset (layout, 0, kShmSize);
+
+    // Set up header
+    layout->header.magic = kMagicCookie;
+    layout->header.layoutVersion = kLayoutVersion;
+    layout->header.version.store (0);
+    layout->header.numInstances.store (0);
+    layout->header.referenceSlot.store (-1);
+    layout->header.sampleRate = 44100;
+}
+
+bool SharedState::validateLayout() const
+{
+    if (layout == nullptr)
+        return false;
+
+    // Check magic cookie
+    if (layout->header.magic != kMagicCookie)
+        return false;
+
+    // Check layout version
+    if (layout->header.layoutVersion != kLayoutVersion)
+        return false;
+
+    return true;
 }
 
 void SharedState::shutdown()
 {
-#if defined(__linux__) || defined(__APPLE__)
-    if (shmPtr != nullptr)
-    {
-        munmap (shmPtr, kShmSize);
-        shmPtr = nullptr;
-        layout = nullptr;
-    }
-    if (shmFd >= 0)
-    {
-        close (shmFd);
-        shmFd = -1;
-    }
-    // Don't shm_unlink - other instances may still be using it
-#endif
+    shm_.close();
+    layout = nullptr;
+}
+
+uint64_t SharedState::getCurrentTimeMs() const
+{
+    using namespace std::chrono;
+    return static_cast<uint64_t> (
+        duration_cast<milliseconds> (
+            steady_clock::now().time_since_epoch()
+        ).count()
+    );
 }
 
 int SharedState::registerInstance (const juce::String& trackName)
 {
     if (layout == nullptr)
         return -1;
+
+    uint64_t now = getCurrentTimeMs();
 
     // Find a free slot
     for (int i = 0; i < kMaxInstances; ++i)
@@ -84,15 +101,27 @@ int SharedState::registerInstance (const juce::String& trackName)
         if (layout->slots[i].active.compare_exchange_strong (expected, 1))
         {
             layout->slots[i].instanceId = nextInstanceId.fetch_add (1);
-            layout->slots[i].heartbeat.store (1);
+            layout->slots[i].heartbeatMs.store (now);
             std::strncpy (layout->slots[i].trackName, trackName.toRawUTF8(), 63);
             layout->slots[i].trackName[63] = '\0';
+
+            // Reset analysis data
+            layout->slots[i].delaySamples = 0.0f;
+            layout->slots[i].delayMs = 0.0f;
+            layout->slots[i].correlation = 0.0f;
+            layout->slots[i].overallCoherence = 0.0f;
+            layout->slots[i].phaseDegrees = 0.0f;
+            layout->slots[i].polarityInverted = false;
+            layout->slots[i].timeCorrectionOn = false;
+            layout->slots[i].phaseCorrectionOn = false;
+            std::memset (layout->slots[i].spectralBands, 0, sizeof (layout->slots[i].spectralBands));
+
             layout->header.numInstances.fetch_add (1);
             layout->header.version.fetch_add (1);
             return i;
         }
     }
-    return -1; // No free slots
+    return -1;  // No free slots
 }
 
 void SharedState::deregisterInstance (int slot)
@@ -101,7 +130,7 @@ void SharedState::deregisterInstance (int slot)
         return;
 
     layout->slots[slot].active.store (0);
-    layout->slots[slot].heartbeat.store (0);
+    layout->slots[slot].heartbeatMs.store (0);
     std::memset (layout->slots[slot].trackName, 0, 64);
     layout->header.numInstances.fetch_sub (1);
 
@@ -116,7 +145,8 @@ void SharedState::updateHeartbeat (int slot)
 {
     if (layout == nullptr || slot < 0 || slot >= kMaxInstances)
         return;
-    layout->slots[slot].heartbeat.fetch_add (1);
+
+    layout->slots[slot].heartbeatMs.store (getCurrentTimeMs());
 }
 
 void SharedState::cleanupStaleInstances()
@@ -124,9 +154,37 @@ void SharedState::cleanupStaleInstances()
     if (layout == nullptr)
         return;
 
-    // Simple staleness: if heartbeat hasn't changed, mark inactive
-    // This is called once at init; a more sophisticated version would
-    // use timers, but for now just trust the heartbeat counter
+    uint64_t now = getCurrentTimeMs();
+    bool changed = false;
+
+    for (int i = 0; i < kMaxInstances; ++i)
+    {
+        uint32_t status = layout->slots[i].active.load();
+        if (status == 0)
+            continue;  // Already free
+
+        uint64_t lastHeartbeat = layout->slots[i].heartbeatMs.load();
+
+        // Check for timeout (with wraparound protection)
+        if (lastHeartbeat > 0 && now > lastHeartbeat &&
+            (now - lastHeartbeat) > kHeartbeatTimeoutMs)
+        {
+            // Stale instance - clean it up
+            layout->slots[i].active.store (0);
+            layout->slots[i].heartbeatMs.store (0);
+            std::memset (layout->slots[i].trackName, 0, 64);
+            layout->header.numInstances.fetch_sub (1);
+
+            // Clear reference if it was this slot
+            int32_t expected = i;
+            layout->header.referenceSlot.compare_exchange_strong (expected, -1);
+
+            changed = true;
+        }
+    }
+
+    if (changed)
+        layout->header.version.fetch_add (1);
 }
 
 void SharedState::setReferenceSlot (int slot)
@@ -210,7 +268,7 @@ void SharedState::setInstanceAligned (int slot)
 {
     if (layout == nullptr || slot < 0 || slot >= kMaxInstances)
         return;
-    layout->slots[slot].active.store (2); // 2 = aligned
+    layout->slots[slot].active.store (2);  // 2 = aligned
     layout->header.version.fetch_add (1);
 }
 
