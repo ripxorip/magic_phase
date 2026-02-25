@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Magic Phase — Living Bars</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #2a2a2e;
+    --surface: #323237;
+    --surface2: #3a3a40;
+    --surface3: #44444b;
+    --border: rgba(255,255,255,0.06);
+    --text: #eaeaec;
+    --text2: #8e8e96;
+    --text3: #5a5a63;
+    --gold: #e8e8ec;
+    --gold-bright: #ffffff;
+    --gold-dim: rgba(255,255,255,0.06);
+    --green: #3ecf8e;
+    --green-dim: rgba(62,207,142,0.06);
+    --blue: #5b8def;
+    --pink: #e8618c;
+    --yellow: #edc039;
+    --red: #ef4444;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: #1e1e22;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Space Grotesk', sans-serif;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .plugin {
+    width: 740px;
+    background: var(--bg);
+    border-radius: 6px;
+    box-shadow: 0 40px 80px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
+    overflow: hidden;
+    animation: pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes pop {
+    from { opacity:0; transform: scale(0.96); }
+    to { opacity:1; transform: scale(1); }
+  }
+
+  /* === HEADER === */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 2px solid var(--gold);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .brand-block {
+    background: var(--gold);
+    color: var(--bg);
+    font-weight: 700;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    padding: 4px 8px;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+
+  .brand-name {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    text-transform: uppercase;
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .coherence-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    padding: 5px 12px;
+    border-radius: 3px;
+    border: 1.5px solid rgba(255,255,255,0.12);
+  }
+
+  .coh-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text3);
+  }
+
+  .coh-val {
+    font-family: 'Space Mono', monospace;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--green);
+    line-height: 1;
+  }
+
+  .coh-ring {
+    width: 32px;
+    height: 32px;
+    position: relative;
+  }
+
+  .coh-ring svg {
+    transform: rotate(-90deg);
+  }
+
+  .coh-ring-val {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Space Mono', monospace;
+    font-size: 7px;
+    font-weight: 700;
+    color: var(--green);
+  }
+
+  /* === LIVING TRACKS === */
+  .tracks {
+    padding: 8px 0;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+
+  .tracks::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .tracks::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .tracks::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.12);
+    border-radius: 2px;
+  }
+
+  .tracks::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.2);
+  }
+
+  .track-row {
+    position: relative;
+    padding: 0 20px;
+    margin-bottom: 6px;
+    cursor: default;
+    transition: all 0.2s;
+  }
+
+  .track-row:last-child { margin-bottom: 0; }
+
+  /* The living bar background */
+  .track-bar-bg {
+    position: relative;
+    background: #28282c;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1.5px solid rgba(255,255,255,0.12);
+    transition: border-color 0.3s;
+  }
+
+  .track-row:hover .track-bar-bg {
+    border-color: rgba(255,255,255,0.2);
+  }
+
+  .track-row.ref .track-bar-bg {
+    border-color: rgba(255,255,255,0.25);
+  }
+
+  /* Spectral bands — the living visualization INSIDE each track */
+  .spectral-bands {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: flex-end;
+    padding: 0 0 0 0;
+    pointer-events: none;
+    opacity: 1;
+  }
+
+  .spectral-band {
+    flex: 1;
+    border-radius: 1px 1px 0 0;
+    transition: height 0.15s ease;
+    min-width: 1px;
+  }
+
+  /* Correlation fill — sweeps left to right */
+  .corr-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    border-radius: 3px 0 0 3px;
+    pointer-events: none;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Track content overlay */
+  .track-content {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 14px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  }
+
+  .t-pip {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  .t-name {
+    font-size: 13px;
+    font-weight: 600;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .ref-badge {
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--gold);
+    border: 1.5px solid var(--gold);
+    padding: 0 4px;
+    border-radius: 2px;
+  }
+
+  .t-stats {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .t-stat {
+    text-align: right;
+  }
+
+  .t-stat-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 7px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--text3);
+    text-transform: uppercase;
+    line-height: 1;
+    margin-bottom: 2px;
+  }
+
+  .t-stat-val {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+  }
+
+  .t-corr-val {
+    font-family: 'Space Mono', monospace;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+    min-width: 44px;
+    text-align: right;
+  }
+
+  .t-toggles {
+    display: flex;
+    gap: 8px;
+    margin-left: 4px;
+  }
+
+  .tog-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .tog-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.7);
+    letter-spacing: 0.5px;
+    min-width: 10px;
+  }
+
+  .chunky-tog {
+    width: 28px;
+    height: 16px;
+    border-radius: 3px;
+    border: 2px solid var(--text3);
+    background: var(--surface3);
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s;
+    z-index: 3;
+  }
+
+  .chunky-tog::after {
+    content: '';
+    position: absolute;
+    width: 9px;
+    height: 10px;
+    border-radius: 2px;
+    background: var(--text3);
+    top: 1px;
+    left: 1px;
+    transition: all 0.2s;
+  }
+
+  .chunky-tog.on {
+    background: var(--gold);
+    border-color: var(--gold-bright);
+  }
+
+  .chunky-tog.on::after {
+    left: 14px;
+    background: var(--bg);
+  }
+
+  /* === BOTTOM === */
+  .bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-top: 1.5px solid rgba(255,255,255,0.1);
+  }
+
+  .align-btn {
+    height: 44px;
+    padding: 0 36px;
+    border-radius: 4px;
+    border: 2px solid var(--gold-bright);
+    background: var(--gold);
+    color: var(--bg);
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .align-btn:hover {
+    background: var(--gold-bright);
+  }
+
+  .align-btn:active {
+    opacity: 0.85;
+  }
+
+  .right-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .mode-btn {
+    height: 34px;
+    padding: 0 12px;
+    border-radius: 3px;
+    border: 1.5px solid rgba(255,255,255,0.12);
+    background: var(--surface);
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text2);
+  }
+
+  .mode-btn:hover { border-color: rgba(255,255,255,0.2); color: var(--text); }
+
+  .mode-btn.active {
+    background: var(--gold);
+    border-color: var(--gold);
+    color: var(--bg);
+  }
+
+  .ab-block {
+    height: 34px;
+    width: 42px;
+    border-radius: 3px;
+    border: 1.5px solid rgba(255,255,255,0.12);
+    background: var(--surface);
+    font-family: 'Space Mono', monospace;
+    font-weight: 700;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    margin-left: 4px;
+    color: var(--text2);
+    transition: all 0.15s;
+  }
+
+  .ab-block:hover { border-color: rgba(255,255,255,0.2); }
+  .ab-block .a-let { color: var(--gold); }
+
+  /* === ALIGN ANIMATION === */
+  @keyframes alignPulse {
+    0% { opacity: 0.4; }
+    50% { opacity: 0.8; }
+    100% { opacity: 0.4; }
+  }
+
+  .track-row.aligning .spectral-bands {
+    animation: alignPulse 0.6s ease-in-out infinite;
+  }
+
+  .track-row.aligned .track-bar-bg {
+    border-color: rgba(62,207,142,0.3) !important;
+  }
+</style>
+</head>
+<body>
+
+<div class="plugin">
+  <!-- HEADER -->
+  <div class="header">
+    <div class="brand">
+      <div class="brand-block">PKG</div>
+      <div class="brand-name">Magic Phase</div>
+    </div>
+    <div class="header-right">
+      <div class="coherence-chip">
+        <span class="coh-label">Coherence</span>
+        <span class="coh-val" id="cohVal">0.93</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIVING TRACKS -->
+  <div class="tracks" id="tracks"></div>
+
+  <!-- BOTTOM -->
+  <div class="bottom">
+    <button class="align-btn" id="alignBtn">MAGIC ALIGN</button>
+    <div class="right-group">
+      <button class="mode-btn active" data-m="b">T+Φ</button>
+      <button class="mode-btn" data-m="p">Φ</button>
+      <button class="mode-btn" data-m="t">T</button>
+      <button class="ab-block"><span class="a-let">A</span><span style="color:var(--text3)">/</span><span>B</span></button>
+    </div>
+  </div>
+</div>
+
+<script>
+// === TRACK DATA ===
+const trackData = [
+  { name:'Kick In', color:'#8a8a94', offset:0, phase:0, corr:1.0, ref:true,
+    profile: new Array(48).fill(0).map(()=>0.02+Math.random()*0.03) },
+  { name:'Kick Out', color:'#8a8a94', offset:-0.4, phase:12, corr:0.94, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.1)*4)**2))*0.7+0.05+Math.random()*0.03;}) },
+  { name:'Kick Sub', color:'#8a8a94', offset:-0.2, phase:-8, corr:0.97, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.06)*5)**2))*0.5+0.03+Math.random()*0.02;}) },
+  { name:'Snare Top', color:'#8a8a94', offset:-1.2, phase:34, corr:0.88, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.35)*3)**2))*0.8+Math.exp(-(((f-0.7)*5)**2))*0.3+0.05+Math.random()*0.03;}) },
+  { name:'Snare Bottom', color:'#8a8a94', offset:-1.4, phase:-156, corr:0.72, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.4)*2.5)**2))*0.95+Math.exp(-(((f-0.15)*4)**2))*0.4+0.06+Math.random()*0.03;}) },
+  { name:'Hi-Hat', color:'#8a8a94', offset:-0.9, phase:22, corr:0.91, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.75)*3)**2))*0.6+Math.exp(-(((f-0.5)*5)**2))*0.2+0.04+Math.random()*0.03;}) },
+  { name:'Rack Tom', color:'#8a8a94', offset:-1.8, phase:41, corr:0.85, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.25)*3)**2))*0.75+0.05+Math.random()*0.03;}) },
+  { name:'Floor Tom', color:'#8a8a94', offset:-2.1, phase:38, corr:0.83, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.18)*3.5)**2))*0.8+0.04+Math.random()*0.03;}) },
+  { name:'OH Left', color:'#8a8a94', offset:-3.2, phase:67, corr:0.79, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.3)*2)**2))*0.6+Math.exp(-(((f-0.6)*3)**2))*0.5+Math.exp(-(((f-0.85)*4)**2))*0.3+0.06+Math.random()*0.03;}) },
+  { name:'OH Right', color:'#8a8a94', offset:-3.3, phase:64, corr:0.80, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.32)*2)**2))*0.58+Math.exp(-(((f-0.62)*3)**2))*0.48+0.06+Math.random()*0.03;}) },
+  { name:'Room Left', color:'#8a8a94', offset:-8.4, phase:112, corr:0.68, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.2)*2)**2))*0.5+Math.exp(-(((f-0.5)*2)**2))*0.45+0.08+Math.random()*0.04;}) },
+  { name:'Room Right', color:'#8a8a94', offset:-8.6, phase:108, corr:0.69, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.22)*2)**2))*0.48+Math.exp(-(((f-0.52)*2)**2))*0.43+0.08+Math.random()*0.04;}) },
+  { name:'Room Mono', color:'#8a8a94', offset:-7.9, phase:98, corr:0.71, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.15)*2.5)**2))*0.55+Math.exp(-(((f-0.45)*2.5)**2))*0.5+0.07+Math.random()*0.04;}) },
+  { name:'Ride', color:'#8a8a94', offset:-2.6, phase:29, corr:0.89, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.65)*3)**2))*0.55+Math.exp(-(((f-0.85)*5)**2))*0.35+0.04+Math.random()*0.03;}) },
+  { name:'China', color:'#8a8a94', offset:-2.9, phase:33, corr:0.86, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.55)*3)**2))*0.5+Math.exp(-(((f-0.8)*4)**2))*0.4+0.05+Math.random()*0.03;}) },
+  { name:'Crush', color:'#8a8a94', offset:-5.1, phase:78, corr:0.74, ref:false,
+    profile: Array.from({length:48},(_,i)=>{const f=i/48; return Math.exp(-(((f-0.3)*2)**2))*0.7+Math.exp(-(((f-0.6)*2.5)**2))*0.55+0.07+Math.random()*0.04;}) },
+];
+
+// === BUILD TRACKS ===
+const tracksEl = document.getElementById('tracks');
+const canvases = [];
+
+trackData.forEach((t, idx) => {
+  const row = document.createElement('div');
+  row.className = 'track-row' + (t.ref ? ' ref' : '');
+  row.dataset.idx = idx;
+
+  const corrColor = t.corr > 0.9 ? 'var(--green)' : t.corr > 0.7 ? 'var(--yellow)' : 'var(--red)';
+  const corrFillColor = t.corr > 0.9 ? 'rgba(62,207,142,0.10)' : t.corr > 0.7 ? 'rgba(237,192,57,0.10)' : 'rgba(239,68,68,0.10)';
+
+  row.innerHTML = `
+    <div class="track-bar-bg">
+      <canvas class="spectral-bands" data-idx="${idx}"></canvas>
+      <div class="track-content">
+        <div class="t-pip" style="background:${t.color}; color:${t.color}"></div>
+        <div class="t-name">
+          ${t.name}
+          ${t.ref ? '<span class="ref-badge">REF</span>' : ''}
+        </div>
+        <div class="t-stats">
+          <div class="t-stat">
+            <div class="t-stat-label">Offset</div>
+            <div class="t-stat-val">${t.offset >= 0 ? '+' : ''}${t.offset.toFixed(1)}ms</div>
+          </div>
+          <div class="t-stat">
+            <div class="t-stat-label">Phase</div>
+            <div class="t-stat-val">${t.phase >= 0 ? '+' : ''}${t.phase}°</div>
+          </div>
+        </div>
+        <div class="t-corr-val" style="color:${corrColor}">${t.corr.toFixed(2)}</div>
+        <div class="t-toggles">
+          <div class="tog-group">
+            <span class="tog-label">T</span>
+            <div class="chunky-tog on"></div>
+          </div>
+          <div class="tog-group">
+            <span class="tog-label">Φ</span>
+            <div class="chunky-tog on"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  tracksEl.appendChild(row);
+
+  // Get the canvas
+  const canvas = row.querySelector('canvas');
+  canvases.push(canvas);
+});
+
+// === TOGGLE INTERACTION ===
+document.querySelectorAll('.chunky-tog').forEach(t => {
+  t.addEventListener('click', (e) => {
+    e.stopPropagation();
+    t.classList.toggle('on');
+  });
+});
+
+// === MODE BUTTONS ===
+document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.mode-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+}));
+
+// === ALIGN BUTTON ===
+const alignBtn = document.getElementById('alignBtn');
+let isAligning = false;
+
+alignBtn.addEventListener('click', () => {
+  if (isAligning) return;
+  isAligning = true;
+
+  alignBtn.textContent = 'ALIGNING...';
+  alignBtn.style.background = 'var(--surface)';
+  alignBtn.style.color = 'var(--gold)';
+  alignBtn.style.borderColor = 'var(--gold)';
+
+  // Add aligning class to tracks progressively
+  const rows = document.querySelectorAll('.track-row');
+  rows.forEach((row, i) => {
+    setTimeout(() => row.classList.add('aligning'), i * 200);
+  });
+
+  // Aligned state
+  setTimeout(() => {
+    rows.forEach(row => {
+      row.classList.remove('aligning');
+      row.classList.add('aligned');
+    });
+    alignBtn.textContent = 'ALIGNED ✓';
+    alignBtn.style.background = 'var(--green)';
+    alignBtn.style.color = 'var(--bg)';
+    alignBtn.style.borderColor = 'var(--green)';
+
+    // Boost correlation values visually
+    document.querySelectorAll('.t-corr-val').forEach(el => {
+      const v = 0.95 + Math.random() * 0.04;
+      el.textContent = v.toFixed(2);
+      el.style.color = 'var(--green)';
+    });
+    document.querySelectorAll('.corr-fill').forEach(el => {
+      el.style.width = (95 + Math.random() * 4) + '%';
+      el.style.background = 'rgba(62,207,142,0.06)';
+    });
+  }, 1800);
+
+  // Reset
+  setTimeout(() => {
+    rows.forEach(row => row.classList.remove('aligned'));
+    alignBtn.textContent = 'MAGIC ALIGN';
+    alignBtn.style.background = 'var(--gold)';
+    alignBtn.style.color = 'var(--bg)';
+    alignBtn.style.borderColor = 'var(--gold-bright)';
+    isAligning = false;
+  }, 5000);
+});
+
+// === ANIMATE SPECTRAL BANDS ===
+let time = 0;
+
+function initCanvases() {
+  canvases.forEach((canvas, idx) => {
+    const parent = canvas.parentElement;
+    const rect = parent.getBoundingClientRect();
+    canvas.width = rect.width * 2;
+    canvas.height = rect.height * 2;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+  });
+}
+
+// Small delay to let layout settle
+setTimeout(initCanvases, 100);
+window.addEventListener('resize', initCanvases);
+
+function animate() {
+  time += 0.008;
+
+  canvases.forEach((canvas, idx) => {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    if (w === 0 || h === 0) return;
+
+    ctx.clearRect(0, 0, w, h);
+
+    const t = trackData[idx];
+    const profile = t.profile;
+    const numBands = profile.length;
+    const bandW = w / numBands;
+
+    // Parse color
+    const hex = t.color.replace('#', '');
+    const cr = parseInt(hex.substring(0, 2), 16);
+    const cg = parseInt(hex.substring(2, 4), 16);
+    const cb = parseInt(hex.substring(4, 6), 16);
+
+    profile.forEach((base, i) => {
+      // Animated value
+      const jitter =
+        Math.sin(time * 1.5 + i * 0.6 + idx * 4) * 0.05 +
+        Math.sin(time * 3.2 + i * 1.3 + idx * 9) * 0.03 +
+        Math.sin(time * 0.7 + i * 0.3) * 0.025;
+      const val = Math.max(0.01, Math.min(1, base + jitter));
+
+      const barH = val * h * 0.95;
+      const x = i * bandW;
+      const y = h - barH;
+      const gap = 1;
+
+      // Main bar — clean gradient, no glow
+      const grad = ctx.createLinearGradient(x, y, x, h);
+      grad.addColorStop(0, `rgba(${cr},${cg},${cb},${0.55 + val * 0.3})`);
+      grad.addColorStop(0.4, `rgba(${cr},${cg},${cb},${0.25 + val * 0.15})`);
+      grad.addColorStop(1, `rgba(${cr},${cg},${cb},0.04)`);
+
+      ctx.fillStyle = grad;
+      ctx.fillRect(x + gap, y, bandW - gap * 2, barH);
+
+      // Clean top cap — solid, no glow
+      if (val > 0.08) {
+        ctx.fillStyle = `rgba(${cr},${cg},${cb},${0.5 + val * 0.35})`;
+        ctx.fillRect(x + gap, y, bandW - gap * 2, 2);
+      }
+    });
+  });
+
+  requestAnimationFrame(animate);
+}
+animate();
+
+// === COHERENCE ANIMATION ===
+const cohEl = document.getElementById('cohVal');
+
+(function uc() {
+  const v = 0.91 + Math.sin(Date.now() * 0.0006) * 0.03;
+  cohEl.textContent = v.toFixed(2);
+  requestAnimationFrame(uc);
+})();
+</script>
+</body>
+</html>
