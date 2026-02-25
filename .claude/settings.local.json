@@ -14,7 +14,9 @@
       "Bash(git -C contrib/JUCE rev-parse HEAD)",
       "Bash(find:*)",
       "Bash(nix develop:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(git -C /home/ripxorip/dev/magic_phase log --oneline -10)",
+      "Bash(wc:*)"
     ]
   }
 }

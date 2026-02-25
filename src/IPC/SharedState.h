@@ -39,7 +39,7 @@ struct InstanceSlot
 };
 
 static constexpr int kMaxInstances = 16;
-static constexpr int kMaxRefFrames = 128;
+static constexpr int kMaxRefFrames = 512;  // ~10s @ 48kHz with 1024 hop
 static constexpr int kNumBins = 2049;
 
 struct ReferenceSTFTBuffer

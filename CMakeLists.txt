@@ -205,6 +205,70 @@ if(MP_BUILD_CLI_TEST)
     message(STATUS "  CLI Test Tool: ON")
 endif()
 
+# IPC Test Tool
+if(MP_BUILD_CLI_TEST)
+    juce_add_console_app(IPCTest
+        PRODUCT_NAME "IPCTest"
+        COMPANY_NAME "MiGiC Music"
+    )
+
+    set(IPC_TEST_SOURCES
+        src/Tools/IPCTest.cpp
+        src/Tools/AudioFile.cpp
+        src/DSP/STFTProcessor.cpp
+        src/DSP/PhaseAnalyzer.cpp
+        src/DSP/PhaseCorrector.cpp
+        src/IPC/SharedState.cpp
+    )
+
+    # Platform-specific shared memory
+    if(WIN32)
+        list(APPEND IPC_TEST_SOURCES src/IPC/PlatformSharedMemory_win32.cpp)
+    else()
+        list(APPEND IPC_TEST_SOURCES src/IPC/PlatformSharedMemory_posix.cpp)
+    endif()
+
+    target_sources(IPCTest PRIVATE ${IPC_TEST_SOURCES})
+
+    target_compile_definitions(IPCTest PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_STRICT_REFCOUNTEDPTR=1
+        JUCE_DISABLE_JUCE_VERSION_PRINTING=1
+    )
+
+    target_include_directories(IPCTest PRIVATE
+        src
+        src/Tools
+    )
+
+    target_link_libraries(IPCTest PRIVATE
+        juce::juce_core
+        juce::juce_dsp
+        juce::juce_audio_basics
+        juce::juce_data_structures
+        juce::juce_events
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+    )
+
+    if(MP_LINUX)
+        target_compile_definitions(IPCTest PRIVATE MP_LINUX=1)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(IPCTest PRIVATE -fno-lto)
+            target_link_options(IPCTest PRIVATE -fno-lto)
+        endif()
+        find_package(Threads REQUIRED)
+        target_link_libraries(IPCTest PRIVATE Threads::Threads dl rt)
+    endif()
+
+    set_target_properties(IPCTest PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+
+    message(STATUS "  IPC Test Tool: ON")
+endif()
+
 message(STATUS "Magic Phase Configuration:")
 message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Plugin Formats: ${MP_FORMATS}")
