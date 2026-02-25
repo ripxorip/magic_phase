@@ -1,5 +1,14 @@
 # FakeDAW Test Harness - Complete Design Document
 
+## Related Documents
+
+- **[USER_EXPERIENCE_CONTRACT.md](./USER_EXPERIENCE_CONTRACT.md)** - The UX spec that defines WHAT we're testing
+- This document defines HOW we test it
+
+**The FakeDAW validates that the implementation matches the UX contract.**
+
+---
+
 ## Overview
 
 A lightweight test harness that simulates DAW behavior for testing Magic Phase plugin
@@ -455,6 +464,30 @@ void SharedState::writeReferenceFrame (...)
 ---
 
 ## Test Scenarios
+
+These scenarios validate the UX contract. Each tests a specific user journey or edge case
+from `USER_EXPERIENCE_CONTRACT.md`.
+
+### UX Contract → FakeDAW Mapping
+
+| UX Contract Requirement | FakeDAW Scenario | Validates |
+|------------------------|------------------|-----------|
+| "3 clicks, 8 seconds" | basic_align | Core flow works |
+| Auto-reference (first plugin) | basic_align | First track auto-becomes ref |
+| State: WAITING_FOR_AUDIO | basic_align | Button shows progress |
+| State: ANALYZING | basic_align | Analysis runs in background |
+| State: ALIGNED | basic_align | Results displayed |
+| Progress "X.Xs / 7.5s" | basic_align | Accumulation tracked |
+| Late reference selection | delayed_ref | REF can be set after playback starts |
+| Multi-track (1 ref, N targets) | three_track | All targets align to same ref |
+| Mode switching (T+Φ, Φ, T) | mode_switch | Each mode produces different output |
+| Re-alignment | mode_switch | Can align again after aligned |
+| Reference switching | ref_switch | Can change which track is ref |
+| "No reference" error | no_reference | Helpful message, not crash |
+| Insufficient audio | insufficient_data | Graceful handling |
+| A/B bypass | bypass_test | Instant bypass, original audio |
+
+---
 
 ### Scenario 1: Basic Two-Track Alignment
 
