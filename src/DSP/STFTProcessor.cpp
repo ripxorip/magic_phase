@@ -5,9 +5,9 @@
 STFTProcessor::STFTProcessor()
     : fft (kFFTOrder)
 {
-    // Hann window
+    // Periodic Hann window (divide by N for exact COLA)
     for (int i = 0; i < kFFTSize; ++i)
-        window[i] = 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi * i / (kFFTSize - 1)));
+        window[i] = 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi * i / kFFTSize));
 
     inputBuffer.fill (0.0f);
     outputBuffer.fill (0.0f);
@@ -19,7 +19,9 @@ void STFTProcessor::prepare (double sr, int /*maxBlockSize*/)
 {
     sampleRate = sr;
     inputWritePos = 0;
-    outputReadPos = 0;
+    // Initialize outputReadPos to delay reading by kHopSize samples
+    // This ensures all 4 overlapping frames have written before we read
+    outputReadPos = (kFFTSize * 2) - kHopSize;  // = 8192 - 1024 = 7168
     hopCounter = 0;
     overlapWritePos = 0;
 
@@ -62,9 +64,8 @@ void STFTProcessor::processFrame (FrameCallback& callback)
         fftData[i] = inputBuffer[readIdx] * window[i];
     }
 
-    // Zero the imaginary part (JUCE FFT uses interleaved real/imag for performRealOnlyForwardTransform)
-    // Actually JUCE performRealOnlyForwardTransform takes real data and produces complex
-    fft.performRealOnlyForwardTransform (fftData.data(), true);
+    // Forward FFT: store full conjugate-symmetric spectrum so inverse can read it correctly
+    fft.performRealOnlyForwardTransform (fftData.data(), false);
 
     // Convert to std::complex for callback
     auto* complexData = reinterpret_cast<std::complex<float>*> (fftData.data());
@@ -89,11 +90,25 @@ void STFTProcessor::processFrame (FrameCallback& callback)
     // Inverse FFT
     fft.performRealOnlyInverseTransform (fftData.data());
 
-    // Overlap-add with window
+    // Overlap-add with synthesis window
+    // For Hann WOLA (weighted overlap-add) with 75% overlap:
+    // - Analysis window: w[n] = Hann
+    // - Synthesis window: w[n] = Hann
+    // - COLA sum of w^2 = 1.5 at every point
+    // - Scale factor: 1/1.5 = 2/3
+    //
+    // Alternative: Analysis-only (OLA, not WOLA):
+    // - Analysis window: w[n] = Hann
+    // - Synthesis: no window (or rectangular)
+    // - COLA sum of w = 2.0 at every point for Hann with 75% overlap
+    // - Scale factor: 1/2 = 0.5
+    //
+    // Using WOLA (synthesis window) for better frequency-domain selectivity
+    constexpr float colaScale = 2.0f / 3.0f;
     for (int i = 0; i < kFFTSize; ++i)
     {
         int writeIdx = (overlapWritePos + i) % (kFFTSize * 2);
-        overlapBuffer[writeIdx] += fftData[i] * window[i] * (2.0f / 3.0f); // Normalization for 75% overlap Hann
+        overlapBuffer[writeIdx] += fftData[i] * window[i] * colaScale;
     }
 
     overlapWritePos = (overlapWritePos + kHopSize) % (kFFTSize * 2);

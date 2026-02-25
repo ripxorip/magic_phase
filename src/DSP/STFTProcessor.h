@@ -23,6 +23,8 @@ public:
     const std::vector<std::vector<std::complex<float>>>& getAccumulatedFrames() const { return accumulatedFrames; }
     void clearAccumulatedFrames() { accumulatedFrames.clear(); }
 
+    // Latency = FFTSize for proper overlap-add timing
+    // (we need all 4 overlapping frames to contribute before reading)
     int getLatencySamples() const { return kFFTSize; }
 
 private:

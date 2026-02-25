@@ -22,3 +22,6 @@ build/
 
 .direnv/
 .envrc
+
+output_cpp/
+output_python/

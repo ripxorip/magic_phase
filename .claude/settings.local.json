@@ -11,7 +11,10 @@
       "Bash(ls:*)",
       "Bash(grep:*)",
       "Bash(git -C /home/ripxorip/dev/migic/contrib/JUCE log --oneline -1)",
-      "Bash(git -C contrib/JUCE rev-parse HEAD)"
+      "Bash(git -C contrib/JUCE rev-parse HEAD)",
+      "Bash(find:*)",
+      "Bash(nix develop:*)",
+      "Bash(tree:*)"
     ]
   }
 }

@@ -1,4 +1,5 @@
 #include "PhaseAnalyzer.h"
+#include <juce_dsp/juce_dsp.h>
 #include <cmath>
 #include <algorithm>
 #include <numeric>
@@ -43,7 +44,7 @@ void PhaseAnalyzer::analyze (const std::vector<std::vector<std::complex<float>>>
 void PhaseAnalyzer::detectDelay (const std::vector<std::vector<std::complex<float>>>& refFrames,
                                  const std::vector<std::vector<std::complex<float>>>& targetFrames)
 {
-    // Average cross-spectrum across frames for delay detection
+    // Average cross-spectrum across frames
     const int numFrames = static_cast<int> (std::min (refFrames.size(), targetFrames.size()));
     const int numBins = kNumBins;
 
@@ -61,81 +62,58 @@ void PhaseAnalyzer::detectDelay (const std::vector<std::vector<std::complex<floa
         }
     }
 
-    // Inverse FFT of cross-spectrum to get cross-correlation
-    // We'll use a simple approach: find peak of |cross-spectrum| to get GCC-PHAT-like delay
-    // For simplicity, find the phase slope of the cross-spectrum
+    // IFFT the averaged cross-spectrum to get cross-correlation
+    // Pack into interleaved real/imag for JUCE FFT
+    juce::dsp::FFT fft (12); // 2^12 = 4096
+    std::array<float, kFFTSize * 2> fftData {};
 
-    // Actually, compute the weighted average phase slope for delay estimation
-    // delay = -d(phase)/d(omega) * sr / (2*pi)
-    // Use a least-squares fit of the phase vs frequency
-
-    float sumW = 0.0f;
-    float sumWF = 0.0f;
-    float sumWP = 0.0f;
-    float sumWFF = 0.0f;
-    float sumWFP = 0.0f;
-
-    float prevPhase = 0.0f;
-    float unwrappedPhase = 0.0f;
-
-    for (int k = 1; k < numBins; ++k)
+    for (int k = 0; k < numBins; ++k)
     {
-        float mag = std::abs (crossSpectrum[k]);
-        float phase = std::arg (crossSpectrum[k]);
-
-        // Unwrap phase
-        if (k == 1)
-        {
-            unwrappedPhase = phase;
-        }
-        else
-        {
-            float diff = phase - prevPhase;
-            while (diff > kPi) diff -= kTwoPi;
-            while (diff < -kPi) diff += kTwoPi;
-            unwrappedPhase += diff;
-        }
-        prevPhase = phase;
-
-        float freq = static_cast<float> (k);
-        float w = mag * mag; // Weight by magnitude squared
-
-        sumW += w;
-        sumWF += w * freq;
-        sumWP += w * unwrappedPhase;
-        sumWFF += w * freq * freq;
-        sumWFP += w * freq * unwrappedPhase;
+        fftData[k * 2]     = crossSpectrum[k].real();
+        fftData[k * 2 + 1] = crossSpectrum[k].imag();
     }
 
-    if (sumW > 1e-10f)
+    fft.performRealOnlyInverseTransform (fftData.data());
+
+    // Search for the peak within ±maxDelay (50ms)
+    const int maxDelaySamples = static_cast<int> (50.0f * static_cast<float> (sampleRate) / 1000.0f);
+    const int searchRange = std::min (maxDelaySamples, kFFTSize / 2);
+
+    float bestVal = 0.0f;
+    int bestLag = 0;
+
+    // Search positive lags (target is delayed relative to ref): 0..searchRange
+    for (int lag = 0; lag <= searchRange; ++lag)
     {
-        // Weighted least squares: phase = slope * freq + intercept
-        float denom = sumW * sumWFF - sumWF * sumWF;
-        if (std::abs (denom) > 1e-10f)
+        float val = fftData[lag];
+        if (std::abs (val) > std::abs (bestVal))
         {
-            float slope = (sumW * sumWFP - sumWF * sumWP) / denom;
-            // slope = 2*pi*delay/N, so delay = slope * N / (2*pi)
-            delaySamples = slope * kFFTSize / kTwoPi;
+            bestVal = val;
+            bestLag = lag;
         }
     }
 
+    // Search negative lags (target is early relative to ref): wrap-around at end of IFFT
+    for (int lag = 1; lag <= searchRange; ++lag)
+    {
+        float val = fftData[kFFTSize - lag];
+        if (std::abs (val) > std::abs (bestVal))
+        {
+            bestVal = val;
+            bestLag = -lag;
+        }
+    }
+
+    delaySamples = static_cast<float> (bestLag);
     delayMs = delaySamples / static_cast<float> (sampleRate) * 1000.0f;
 
-    // Correlation coefficient
+    // Polarity: negative peak means inverted
+    polarityInverted = (bestVal < 0.0f);
+
+    // Correlation coefficient: |peak| / sqrt(refEnergy * tarEnergy)
     float denom = std::sqrt (refEnergy * tarEnergy);
     if (denom > 1e-10f)
-    {
-        float crossMag = 0.0f;
-        for (int k = 0; k < numBins; ++k)
-            crossMag += std::abs (crossSpectrum[k]);
-        correlation = crossMag / denom;
-    }
-
-    // Check polarity: if the real part of the average cross-spectrum is negative, polarity is inverted
-    float realSum = 0.0f;
-    for (int k = 0; k < numBins; ++k)
-        realSum += crossSpectrum[k].real();
-    polarityInverted = (realSum < 0.0f);
+        correlation = std::abs (bestVal) / denom;
 }
 
 void PhaseAnalyzer::computeSpectralPhase (const std::vector<std::vector<std::complex<float>>>& refFrames,

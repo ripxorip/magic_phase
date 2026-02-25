@@ -23,6 +23,7 @@ endif()
 # Build options
 option(MP_BUILD_VST3 "Build VST3 plugin" ON)
 option(MP_BUILD_STANDALONE "Build Standalone application" ON)
+option(MP_BUILD_CLI_TEST "Build CLI test tool" OFF)
 
 # LTO off on Linux
 if(NOT DEFINED CACHE{MP_ENABLE_LTO})
@@ -142,6 +143,60 @@ set_target_properties(MagicPhase PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
 )
+
+# CLI Test Tool
+if(MP_BUILD_CLI_TEST)
+    juce_add_console_app(MagicPhaseTest
+        PRODUCT_NAME "MagicPhaseTest"
+        COMPANY_NAME "MiGiC Music"
+    )
+
+    target_sources(MagicPhaseTest PRIVATE
+        src/Tools/MagicPhaseTest.cpp
+        src/Tools/AudioFile.cpp
+        src/DSP/STFTProcessor.cpp
+        src/DSP/PhaseAnalyzer.cpp
+        src/DSP/PhaseCorrector.cpp
+    )
+
+    target_compile_definitions(MagicPhaseTest PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_STRICT_REFCOUNTEDPTR=1
+        JUCE_DISABLE_JUCE_VERSION_PRINTING=1
+    )
+
+    target_include_directories(MagicPhaseTest PRIVATE
+        src
+        src/Tools
+    )
+
+    target_link_libraries(MagicPhaseTest PRIVATE
+        juce::juce_core
+        juce::juce_dsp
+        juce::juce_audio_basics
+        juce::juce_data_structures
+        juce::juce_events
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+    )
+
+    if(MP_LINUX)
+        target_compile_definitions(MagicPhaseTest PRIVATE MP_LINUX=1)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(MagicPhaseTest PRIVATE -fno-lto)
+            target_link_options(MagicPhaseTest PRIVATE -fno-lto)
+        endif()
+        find_package(Threads REQUIRED)
+        target_link_libraries(MagicPhaseTest PRIVATE Threads::Threads dl)
+    endif()
+
+    set_target_properties(MagicPhaseTest PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+
+    message(STATUS "  CLI Test Tool: ON")
+endif()
 
 message(STATUS "Magic Phase Configuration:")
 message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
