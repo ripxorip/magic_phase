@@ -28,16 +28,72 @@ void PhaseAnalyzer::prepare (double sr)
     polarityInverted = false;
 }
 
+void PhaseAnalyzer::detectDelayTimeDomain (const std::vector<float>& refSamples,
+                                            const std::vector<float>& targetSamples)
+{
+    const int maxDelaySamples = static_cast<int> (maxDelayMs * sampleRate / 1000.0f);
+    const int n = static_cast<int> (std::min (refSamples.size(), targetSamples.size()));
+
+    if (n < maxDelaySamples * 2)
+        return;  // Not enough samples
+
+    // Compute energy for normalization
+    double refEnergy = 0.0, tarEnergy = 0.0;
+    for (int i = 0; i < n; ++i)
+    {
+        refEnergy += static_cast<double> (refSamples[i]) * refSamples[i];
+        tarEnergy += static_cast<double> (targetSamples[i]) * targetSamples[i];
+    }
+    double normFactor = std::sqrt (refEnergy * tarEnergy);
+
+    // Search for best correlation within ±maxDelaySamples
+    double bestCorr = 0.0;
+    int bestLag = 0;
+
+    for (int lag = -maxDelaySamples; lag <= maxDelaySamples; ++lag)
+    {
+        double sum = 0.0;
+
+        for (int i = 0; i < n; ++i)
+        {
+            int j = i + lag;
+            if (j >= 0 && j < n)
+                sum += static_cast<double> (targetSamples[i]) * refSamples[j];
+        }
+
+        if (std::abs (sum) > std::abs (bestCorr))
+        {
+            bestCorr = sum;
+            bestLag = lag;
+        }
+    }
+
+    // Negate lag to match convention: positive delay means target is delayed
+    delaySamples = static_cast<float> (-bestLag);
+    delayMs = delaySamples / static_cast<float> (sampleRate) * 1000.0f;
+    polarityInverted = (bestCorr < 0.0);
+    correlation = static_cast<float> (std::abs (bestCorr) / (normFactor + 1e-10));
+}
+
+void PhaseAnalyzer::analyzeSpectralPhase (const std::vector<std::vector<std::complex<float>>>& refFrames,
+                                           const std::vector<std::vector<std::complex<float>>>& targetFrames)
+{
+    if (refFrames.empty() || targetFrames.empty())
+        return;
+
+    computeSpectralPhase (refFrames, targetFrames);
+}
+
 void PhaseAnalyzer::analyze (const std::vector<std::vector<std::complex<float>>>& refFrames,
                              const std::vector<std::vector<std::complex<float>>>& targetFrames)
 {
     if (refFrames.empty() || targetFrames.empty())
         return;
 
-    // Step 1: Detect time delay via cross-correlation in frequency domain
+    // Legacy: Use spectral method for delay detection (less accurate)
     detectDelay (refFrames, targetFrames);
 
-    // Step 2: Compute per-frequency spectral phase correction
+    // Compute per-frequency spectral phase correction
     computeSpectralPhase (refFrames, targetFrames);
 }
 

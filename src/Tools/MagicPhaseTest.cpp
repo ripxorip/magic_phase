@@ -90,162 +90,10 @@ static float rmsDb (const std::vector<float>& data)
     return 20.0f * std::log10 (rms + 1e-10f);
 }
 
-// Time-domain cross-correlation for delay detection (matches Python approach)
-struct DelayResult
-{
-    int delaySamples;
-    float correlation;
-    bool polarityInverted;
-};
-
-static DelayResult detectDelayTimeDomain (const std::vector<float>& ref,
-                                           const std::vector<float>& target,
-                                           double sampleRate,
-                                           float maxDelayMs = 50.0f)
-{
-    const int maxDelaySamples = static_cast<int> (maxDelayMs * sampleRate / 1000.0f);
-    const int n = static_cast<int> (std::min (ref.size(), target.size()));
-
-    // Compute energy for normalization
-    double refEnergy = 0.0, tarEnergy = 0.0;
-    for (int i = 0; i < n; ++i)
-    {
-        refEnergy += ref[i] * ref[i];
-        tarEnergy += target[i] * target[i];
-    }
-    double normFactor = std::sqrt (refEnergy * tarEnergy);
-
-    // Search for best correlation within ±maxDelaySamples
-    double bestCorr = 0.0;
-    int bestLag = 0;
-
-    for (int lag = -maxDelaySamples; lag <= maxDelaySamples; ++lag)
-    {
-        double sum = 0.0;
-        int count = 0;
-
-        for (int i = 0; i < n; ++i)
-        {
-            int j = i + lag;
-            if (j >= 0 && j < n)
-            {
-                sum += static_cast<double> (target[i]) * ref[j];
-                count++;
-            }
-        }
-
-        if (std::abs (sum) > std::abs (bestCorr))
-        {
-            bestCorr = sum;
-            bestLag = lag;
-        }
-    }
-
-    DelayResult result;
-    // Negate to match Python's scipy.correlate convention:
-    // positive delay means target is delayed relative to reference
-    result.delaySamples = -bestLag;
-    result.polarityInverted = (bestCorr < 0.0);
-    result.correlation = static_cast<float> (std::abs (bestCorr) / (normFactor + 1e-10));
-
-    return result;
-}
-
-//==============================================================================
-// Test FFT round-trip to verify JUCE scaling
-static void testFFTRoundTrip()
-{
-    std::cout << "--- FFT Round-Trip Test ---\n";
-
-    constexpr int N = 4096;
-    juce::dsp::FFT fft (12);  // 2^12 = 4096
-
-    // Test 1: Simple sine wave
-    std::array<float, N * 2> data {};
-    std::array<float, N> original {};
-
-    for (int i = 0; i < N; ++i)
-    {
-        original[i] = std::sin (2.0f * juce::MathConstants<float>::pi * 440.0f * i / 48000.0f);
-        data[i] = original[i];
-    }
-
-    fft.performRealOnlyForwardTransform (data.data(), false);
-    fft.performRealOnlyInverseTransform (data.data());
-
-    float maxErr = 0.0f, sumErr2 = 0.0f;
-    for (int i = 0; i < N; ++i)
-    {
-        float err = std::abs (data[i] - original[i]);
-        maxErr = std::max (maxErr, err);
-        sumErr2 += err * err;
-    }
-    float rmsErr = std::sqrt (sumErr2 / N);
-
-    std::cout << "  Sine FFT round-trip:\n";
-    std::cout << "    max error: " << maxErr << "\n";
-    std::cout << "    rms error: " << rmsErr << " (" << (20.0f * std::log10 (rmsErr + 1e-10f)) << " dB)\n";
-
-    // Check scale factor (compare first non-zero sample)
-    std::cout << "    scale factor: " << data[100] / original[100] << "\n";
-}
-
-//==============================================================================
-// Verify COLA sum for Hann window with 75% overlap
-static void testCOLASum()
-{
-    std::cout << "\n--- COLA Verification ---\n";
-
-    constexpr int N = 4096;
-    constexpr int hop = N / 4;  // 75% overlap
-
-    // Periodic Hann window (same as STFTProcessor)
-    std::array<float, N> window {};
-    for (int i = 0; i < N; ++i)
-        window[i] = 0.5f * (1.0f - std::cos (2.0f * juce::MathConstants<float>::pi * i / N));
-
-    // Compute COLA sum at several positions
-    // For 75% overlap, 4 frames overlap at any point in steady state
-    // COLA sum = sum of w[position] from 4 overlapping frames
-    std::cout << "  Window type: Periodic Hann (" << N << " samples, hop=" << hop << ")\n";
-
-    // COLA sum of w (analysis-only)
-    float colaSum_w = 0.0f;
-    for (int f = 0; f < 4; ++f)
-        colaSum_w += window[f * hop];  // Sample at position 0 of output
-    std::cout << "  COLA sum of w: " << colaSum_w << " (expected: 2.0 for OLA)\n";
-
-    // COLA sum of w^2 (analysis + synthesis windowing = WOLA)
-    float colaSum_w2 = 0.0f;
-    for (int f = 0; f < 4; ++f)
-        colaSum_w2 += window[f * hop] * window[f * hop];
-    std::cout << "  COLA sum of w^2: " << colaSum_w2 << " (expected: 1.5 for WOLA)\n";
-
-    // Check COLA sum at different positions within the hop
-    float minCola = 1e10f, maxCola = 0.0f;
-    for (int pos = 0; pos < hop; ++pos)
-    {
-        float cola = 0.0f;
-        for (int f = 0; f < 4; ++f)
-        {
-            int winIdx = pos + f * hop;
-            if (winIdx < N)
-                cola += window[winIdx] * window[winIdx];
-        }
-        minCola = std::min (minCola, cola);
-        maxCola = std::max (maxCola, cola);
-    }
-    std::cout << "  COLA range: min=" << minCola << " max=" << maxCola << "\n";
-    std::cout << "  Ideal scale factor: " << (1.0f / colaSum_w2) << "\n";
-}
 
 //==============================================================================
 int main (int argc, char* argv[])
 {
-    // Test FFT first
-    testFFTRoundTrip();
-    testCOLASum();
-
     // Parse arguments
     if (argc < 3)
     {
@@ -346,66 +194,18 @@ int main (int argc, char* argv[])
     };
 
     // =========================================================================
-    // SANITY CHECK: STFT passthrough should be transparent
-    // =========================================================================
-    std::cout << "--- Passthrough Check ---\n";
-    {
-        std::vector<std::vector<std::complex<float>>> dummyFrames;
-        std::vector<float> passthrough = stftPass (tarMono, dummyFrames, nullptr);
-
-        // Measure reconstruction error
-        float maxErr = 0.0f;
-        float sumErr2 = 0.0f;
-        int maxErrIdx = 0;
-        for (int i = 0; i < numSamples; ++i)
-        {
-            float err = std::abs (passthrough[i] - tarMono[i]);
-            if (err > maxErr)
-            {
-                maxErr = err;
-                maxErrIdx = i;
-            }
-            sumErr2 += err * err;
-        }
-        float rmsErr = std::sqrt (sumErr2 / numSamples);
-        std::cout << "  STFT passthrough error: max=" << maxErr
-                  << " rms=" << rmsErr
-                  << " (" << (20.0f * std::log10 (rmsErr + 1e-10f)) << " dB)\n";
-        std::cout << "  Max error at sample " << maxErrIdx << " (t=" << (maxErrIdx / sampleRate) << "s)\n";
-
-        // Error distribution: first 10%, middle 80%, last 10%
-        float sumErr2_first = 0.0f, sumErr2_mid = 0.0f, sumErr2_last = 0.0f;
-        int first10 = numSamples / 10;
-        int last10 = numSamples - first10;
-        for (int i = 0; i < numSamples; ++i)
-        {
-            float err = passthrough[i] - tarMono[i];
-            float err2 = err * err;
-            if (i < first10)
-                sumErr2_first += err2;
-            else if (i >= last10)
-                sumErr2_last += err2;
-            else
-                sumErr2_mid += err2;
-        }
-        std::cout << "  Error distribution:\n";
-        std::cout << "    First 10%: " << (20.0f * std::log10 (std::sqrt (sumErr2_first / first10) + 1e-10f)) << " dB\n";
-        std::cout << "    Middle 80%: " << (20.0f * std::log10 (std::sqrt (sumErr2_mid / (numSamples - 2 * first10)) + 1e-10f)) << " dB\n";
-        std::cout << "    Last 10%: " << (20.0f * std::log10 (std::sqrt (sumErr2_last / first10) + 1e-10f)) << " dB\n";
-    }
-
-    // =========================================================================
     // STAGE 1: Delay detection using time-domain cross-correlation
     // =========================================================================
-    std::cout << "\n--- Stage 1: Delay Detection (Time-Domain) ---\n";
+    std::cout << "--- Stage 1: Delay Detection ---\n";
 
-    // Use time-domain cross-correlation (matches Python approach)
-    auto delayResult = detectDelayTimeDomain (refMono, tarMono, sampleRate);
+    PhaseAnalyzer delayAnalyzer;
+    delayAnalyzer.prepare (sampleRate);
+    delayAnalyzer.detectDelayTimeDomain (refMono, tarMono);
 
-    float delaySamples = static_cast<float> (delayResult.delaySamples);
-    float delayMs = delaySamples / static_cast<float> (sampleRate) * 1000.0f;
-    float correlation = delayResult.correlation;
-    bool polarityInverted = delayResult.polarityInverted;
+    float delaySamples = delayAnalyzer.getDelaySamples();
+    float delayMs = delayAnalyzer.getDelayMs();
+    float correlation = delayAnalyzer.getCorrelation();
+    bool polarityInverted = delayAnalyzer.getPolarityInverted();
 
     std::cout << "  Delay: " << delaySamples << " samples (" << delayMs << " ms)\n";
     std::cout << "  Correlation: " << correlation << "\n";
@@ -445,7 +245,7 @@ int main (int argc, char* argv[])
     spectralAnalyzer.prepare (sampleRate);
     spectralAnalyzer.setCoherenceThreshold (0.4f);
     spectralAnalyzer.setMaxCorrectionDeg (120.0f);
-    spectralAnalyzer.analyze (refFrames2, corrFrames2);
+    spectralAnalyzer.analyzeSpectralPhase (refFrames2, corrFrames2);
 
     float coherence = spectralAnalyzer.getOverallCoherence();
     float phaseDeg = spectralAnalyzer.getPhaseDegrees();

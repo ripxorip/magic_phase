@@ -44,9 +44,10 @@ private:
     std::array<float, kFFTSize * 2> overlapBuffer {};
     int overlapWritePos = 0;
 
-    // Store frames for analysis
+    // Store frames for analysis (circular buffer)
     std::vector<std::vector<std::complex<float>>> accumulatedFrames;
     static constexpr int kMaxAccumulatedFrames = 128;
+    int accumulatedFrameWriteIdx = 0;
 
     double sampleRate = 44100.0;
 };

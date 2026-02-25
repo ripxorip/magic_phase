@@ -30,6 +30,7 @@ void STFTProcessor::prepare (double sr, int /*maxBlockSize*/)
     fftData.fill (0.0f);
     overlapBuffer.fill (0.0f);
     accumulatedFrames.clear();
+    accumulatedFrameWriteIdx = 0;
 }
 
 void STFTProcessor::processBlock (float* channelData, int numSamples, FrameCallback callback)
@@ -70,17 +71,16 @@ void STFTProcessor::processFrame (FrameCallback& callback)
     // Convert to std::complex for callback
     auto* complexData = reinterpret_cast<std::complex<float>*> (fftData.data());
 
-    // Store frame for analysis
+    // Store frame for analysis (circular buffer)
     if (accumulatedFrames.size() < kMaxAccumulatedFrames)
     {
         accumulatedFrames.emplace_back (complexData, complexData + kNumBins);
     }
     else
     {
-        // Circular: overwrite oldest
-        static int frameWritePos = 0;
-        accumulatedFrames[frameWritePos % kMaxAccumulatedFrames].assign (complexData, complexData + kNumBins);
-        frameWritePos++;
+        // Overwrite oldest frame in circular fashion
+        accumulatedFrames[accumulatedFrameWriteIdx].assign (complexData, complexData + kNumBins);
+        accumulatedFrameWriteIdx = (accumulatedFrameWriteIdx + 1) % kMaxAccumulatedFrames;
     }
 
     // User callback for frequency-domain processing
@@ -90,20 +90,8 @@ void STFTProcessor::processFrame (FrameCallback& callback)
     // Inverse FFT
     fft.performRealOnlyInverseTransform (fftData.data());
 
-    // Overlap-add with synthesis window
-    // For Hann WOLA (weighted overlap-add) with 75% overlap:
-    // - Analysis window: w[n] = Hann
-    // - Synthesis window: w[n] = Hann
-    // - COLA sum of w^2 = 1.5 at every point
-    // - Scale factor: 1/1.5 = 2/3
-    //
-    // Alternative: Analysis-only (OLA, not WOLA):
-    // - Analysis window: w[n] = Hann
-    // - Synthesis: no window (or rectangular)
-    // - COLA sum of w = 2.0 at every point for Hann with 75% overlap
-    // - Scale factor: 1/2 = 0.5
-    //
-    // Using WOLA (synthesis window) for better frequency-domain selectivity
+    // Overlap-add with synthesis window (WOLA)
+    // Hann window with 75% overlap: COLA sum of w^2 = 1.5, scale = 2/3
     constexpr float colaScale = 2.0f / 3.0f;
     for (int i = 0; i < kFFTSize; ++i)
     {
