@@ -6,6 +6,7 @@ struct TrackRowData
 {
     juce::String name;
     bool isReference = false;
+    bool isThisInstance = false;  // True if this row represents THIS plugin instance
     bool isActive = false;
     bool isAligned = false;
     float offsetMs = 0.0f;

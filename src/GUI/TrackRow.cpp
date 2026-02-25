@@ -42,10 +42,10 @@ void TrackRow::paint (juce::Graphics& g)
     float y = contentBounds.getY();
     float h = contentBounds.getHeight();
 
-    // Color pip
+    // Color pip (gold if this is OUR instance)
     float pipX = contentBounds.getX();
     float pipY = y + (h - 10.0f) / 2.0f;
-    g.setColour (MagicColors::text2);
+    g.setColour (data.isThisInstance ? MagicColors::gold : MagicColors::text2);
     g.fillRoundedRectangle (pipX, pipY, 10.0f, 10.0f, 2.0f);
 
     // Track name

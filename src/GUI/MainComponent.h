@@ -33,6 +33,7 @@ private:
     juce::OwnedArray<TrackRow> trackRows;
 
     // Bottom bar
+    juce::TextButton refButton { "REF" };
     juce::TextButton alignButton { "MAGIC ALIGN" };
     juce::TextButton modeTPhi { juce::String::fromUTF8 ("T+\xce\xa6") };
     juce::TextButton modePhi { juce::String::fromUTF8 ("\xce\xa6") };

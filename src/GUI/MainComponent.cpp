@@ -20,6 +20,17 @@ MainComponent::MainComponent (MagicPhaseProcessor& p)
                                                      juce::Colour (255, 255, 255).withAlpha (0.12f));
     addAndMakeVisible (trackViewport);
 
+    // REF button (toggle)
+    refButton.setClickingTogglesState (true);
+    refButton.setColour (juce::TextButton::buttonColourId, MagicColors::surface);
+    refButton.setColour (juce::TextButton::buttonOnColourId, MagicColors::gold);
+    refButton.setColour (juce::TextButton::textColourOffId, MagicColors::text2);
+    refButton.setColour (juce::TextButton::textColourOnId, MagicColors::bg);
+    refButton.onClick = [this] {
+        processor.setIsReference (refButton.getToggleState());
+    };
+    addAndMakeVisible (refButton);
+
     // Align button
     alignButton.setColour (juce::TextButton::buttonColourId, MagicColors::gold);
     alignButton.setColour (juce::TextButton::textColourOffId, MagicColors::bg);
@@ -117,6 +128,8 @@ void MainComponent::resized()
     auto bottomArea = bounds.removeFromBottom (68);
     auto bottomInner = bottomArea.reduced (20, 12);
 
+    refButton.setBounds (bottomInner.removeFromLeft (52).reduced (0, 6));
+    bottomInner.removeFromLeft (12);  // spacing
     alignButton.setBounds (bottomInner.removeFromLeft (160).reduced (0, 0));
 
     auto rightGroup = bottomInner.removeFromRight (200);
@@ -162,6 +175,12 @@ void MainComponent::refreshTrackList()
     // Check for changes
     uint32_t currentVersion = header->version.load();
     int refSlot = header->referenceSlot.load();
+    int mySlot = processor.getMySlot();
+
+    // Sync REF button state
+    bool amIReference = (mySlot >= 0 && mySlot == refSlot);
+    if (refButton.getToggleState() != amIReference)
+        refButton.setToggleState (amIReference, juce::dontSendNotification);
 
     // Count active slots
     int numActive = 0;
@@ -198,6 +217,7 @@ void MainComponent::refreshTrackList()
             TrackRowData data;
             data.name = juce::String (slot->trackName);
             data.isReference = (i == refSlot);
+            data.isThisInstance = (i == mySlot);
             data.isActive = true;
             data.isAligned = (slot->active.load() == 2);
             data.offsetMs = slot->delayMs;
