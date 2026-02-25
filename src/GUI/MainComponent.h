@@ -18,6 +18,7 @@ public:
 
 private:
     void refreshTrackList();
+    void updateAlignButton();
     void onAlignClicked();
     void onModeClicked (int mode);
 

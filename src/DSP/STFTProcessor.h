@@ -45,8 +45,9 @@ private:
     int overlapWritePos = 0;
 
     // Store frames for analysis (circular buffer)
+    // Match kMaxRefFrames in SharedState for proper temporal alignment
     std::vector<std::vector<std::complex<float>>> accumulatedFrames;
-    static constexpr int kMaxAccumulatedFrames = 128;
+    static constexpr int kMaxAccumulatedFrames = 512;
     int accumulatedFrameWriteIdx = 0;
 
     double sampleRate = 44100.0;

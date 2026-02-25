@@ -191,7 +191,14 @@ void SharedState::setReferenceSlot (int slot)
 {
     if (layout == nullptr)
         return;
+
+    int oldRef = layout->header.referenceSlot.load();
     layout->header.referenceSlot.store (slot);
+
+    // If reference changed, clear the reference buffer to avoid stale data
+    if (oldRef != slot)
+        layout->refBuffer.writePos.store (0);
+
     layout->header.version.fetch_add (1);
 }
 

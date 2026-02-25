@@ -160,6 +160,55 @@ void MainComponent::resized()
 void MainComponent::timerCallback()
 {
     refreshTrackList();
+    updateAlignButton();
+}
+
+void MainComponent::updateAlignButton()
+{
+    auto state = processor.getAlignmentState();
+    float seconds = processor.getAccumulatedSeconds();
+
+    switch (state)
+    {
+        case AlignmentState::IDLE:
+            alignButton.setButtonText ("MAGIC ALIGN");
+            alignButton.setColour (juce::TextButton::buttonColourId, MagicColors::gold);
+            alignButton.setColour (juce::TextButton::textColourOffId, MagicColors::bg);
+            break;
+
+        case AlignmentState::WAITING:
+        {
+            // Show progress: "▶ PLAY  2.1s / 7.5s"
+            juce::String text = juce::String::fromUTF8 ("\xe2\x96\xb6 PLAY  ")
+                              + juce::String (seconds, 1) + "s / "
+                              + juce::String (MagicPhaseProcessor::kRequiredSeconds, 1) + "s";
+            alignButton.setButtonText (text);
+            alignButton.setColour (juce::TextButton::buttonColourId, MagicColors::surface);
+            alignButton.setColour (juce::TextButton::textColourOffId, MagicColors::gold);
+            break;
+        }
+
+        case AlignmentState::ANALYZING:
+            alignButton.setButtonText ("ANALYZING...");
+            alignButton.setColour (juce::TextButton::buttonColourId, MagicColors::surface);
+            alignButton.setColour (juce::TextButton::textColourOffId, MagicColors::text);
+            break;
+
+        case AlignmentState::ALIGNED:
+        {
+            // Show results: "✓ ALIGNED  -1.0ms  φ -8°"
+            float delayMs = processor.getPhaseAnalyzer().getDelayMs();
+            float phaseDeg = processor.getPhaseAnalyzer().getPhaseDegrees();
+            juce::String text = juce::String::fromUTF8 ("\xe2\x9c\x93 ALIGNED  ")
+                              + juce::String (delayMs, 1) + "ms  "
+                              + juce::String::fromUTF8 ("\xcf\x86 ")
+                              + juce::String ((int)phaseDeg) + juce::String::fromUTF8 ("\xc2\xb0");
+            alignButton.setButtonText (text);
+            alignButton.setColour (juce::TextButton::buttonColourId, MagicColors::green);
+            alignButton.setColour (juce::TextButton::textColourOffId, MagicColors::bg);
+            break;
+        }
+    }
 }
 
 void MainComponent::refreshTrackList()
@@ -254,19 +303,19 @@ void MainComponent::refreshTrackList()
 
 void MainComponent::onAlignClicked()
 {
-    processor.triggerAlign();
+    auto state = processor.getAlignmentState();
 
-    // Visual feedback
-    alignButton.setButtonText ("ALIGNING...");
-    alignButton.setColour (juce::TextButton::buttonColourId, MagicColors::surface);
-    alignButton.setColour (juce::TextButton::textColourOffId, MagicColors::gold);
-
-    // Reset button text after a delay
-    juce::Timer::callAfterDelay (2000, [this] {
-        alignButton.setButtonText ("MAGIC ALIGN");
-        alignButton.setColour (juce::TextButton::buttonColourId, MagicColors::gold);
-        alignButton.setColour (juce::TextButton::textColourOffId, MagicColors::bg);
-    });
+    if (state == AlignmentState::IDLE || state == AlignmentState::ALIGNED)
+    {
+        // Start alignment process - wait for audio
+        processor.startAlign();
+    }
+    else if (state == AlignmentState::WAITING)
+    {
+        // Cancel alignment
+        processor.cancelAlign();
+    }
+    // If ANALYZING, ignore clicks
 }
 
 void MainComponent::onModeClicked (int mode)

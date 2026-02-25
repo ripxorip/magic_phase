@@ -89,22 +89,50 @@ void MagicPhaseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     }
     else if (isBypassed.load())
     {
-        // Bypassed: just pass through, but still write heartbeat
+        // Bypassed: just pass through, but still process STFT for frame accumulation
         stftProcessor.processBlock (channelData, numSamples, nullptr);
     }
     else
     {
-        // Target: apply correction
-        int mode = correctionMode.load();
-        bool applyTime = (mode == 0 || mode == 2);
-        bool applyPhase = (mode == 0 || mode == 1);
+        // Target track processing
+        AlignmentState state = alignmentState.load();
 
-        stftProcessor.processBlock (channelData, numSamples, [this, applyTime, applyPhase] (std::complex<float>* frame, int numBins) {
-            if (applyTime)
-                phaseCorrector.applyTimeCorrection (frame, numBins);
-            if (applyPhase)
-                phaseCorrector.applyPhaseCorrection (frame, numBins);
-        });
+        if (state == AlignmentState::WAITING)
+        {
+            // Accumulating audio - just process STFT without correction
+            stftProcessor.processBlock (channelData, numSamples, nullptr);
+
+            // Track accumulated time
+            accumulatedSamples += numSamples;
+            float seconds = static_cast<float> (accumulatedSamples) / static_cast<float> (currentSampleRate);
+            accumulatedSeconds.store (seconds);
+
+            // Auto-trigger analysis when we have enough audio
+            if (seconds >= kRequiredSeconds)
+            {
+                alignmentState.store (AlignmentState::ANALYZING);
+                triggerAlign();
+            }
+        }
+        else if (state == AlignmentState::ALIGNED)
+        {
+            // Apply correction
+            int mode = correctionMode.load();
+            bool applyTime = (mode == 0 || mode == 2);
+            bool applyPhase = (mode == 0 || mode == 1);
+
+            stftProcessor.processBlock (channelData, numSamples, [this, applyTime, applyPhase] (std::complex<float>* frame, int numBins) {
+                if (applyTime)
+                    phaseCorrector.applyTimeCorrection (frame, numBins);
+                if (applyPhase)
+                    phaseCorrector.applyPhaseCorrection (frame, numBins);
+            });
+        }
+        else
+        {
+            // IDLE or ANALYZING: pass through but still process STFT for frame accumulation
+            stftProcessor.processBlock (channelData, numSamples, nullptr);
+        }
     }
 
     // Update shared state with analysis data
@@ -142,12 +170,35 @@ void MagicPhaseProcessor::setStateInformation (const void* data, int sizeInBytes
         apvts.replaceState (juce::ValueTree::fromXml (*xml));
 }
 
+void MagicPhaseProcessor::startAlign()
+{
+    // Transition to WAITING state - start accumulating audio
+    alignmentState.store (AlignmentState::WAITING);
+    accumulatedSamples = 0;
+    accumulatedSeconds.store (0.0f);
+
+    // Clear accumulated frames for fresh analysis
+    stftProcessor.clearAccumulatedFrames();
+}
+
+void MagicPhaseProcessor::cancelAlign()
+{
+    // Cancel alignment and go back to IDLE
+    alignmentState.store (AlignmentState::IDLE);
+    accumulatedSamples = 0;
+    accumulatedSeconds.store (0.0f);
+}
+
 void MagicPhaseProcessor::triggerAlign()
 {
     // Read reference STFT frames from shared memory and run analysis
     int refSlot = sharedState.getReferenceSlot();
     if (refSlot < 0 || refSlot == mySlot)
+    {
+        // No valid reference - go back to IDLE
+        alignmentState.store (AlignmentState::IDLE);
         return;
+    }
 
     // Get coherence threshold and max correction from parameters
     float cohThreshold = apvts.getRawParameterValue ("coherenceThreshold")->load();
@@ -170,6 +221,9 @@ void MagicPhaseProcessor::triggerAlign()
     // Update shared state
     if (mySlot >= 0)
         sharedState.setInstanceAligned (mySlot);
+
+    // Transition to ALIGNED state - correction is now active
+    alignmentState.store (AlignmentState::ALIGNED);
 }
 
 void MagicPhaseProcessor::setIsReference (bool isRef)

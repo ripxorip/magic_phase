@@ -16,7 +16,8 @@
       "Bash(nix develop:*)",
       "Bash(tree:*)",
       "Bash(git -C /home/ripxorip/dev/magic_phase log --oneline -10)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(mkdir:*)"
     ]
   }
 }

@@ -6,6 +6,15 @@
 #include "PhaseCorrector.h"
 #include "SharedState.h"
 
+// Alignment state machine (per UX contract)
+enum class AlignmentState
+{
+    IDLE,       // Ready to start - shows "MAGIC ALIGN"
+    WAITING,    // Accumulating audio - shows "▶ PLAY TRACKS X.Xs / 7.5s"
+    ANALYZING,  // Running analysis - shows "ANALYZING..."
+    ALIGNED     // Correction active - shows "✓ ALIGNED"
+};
+
 class MagicPhaseProcessor : public juce::AudioProcessor
 {
 public:
@@ -41,7 +50,15 @@ public:
     PhaseAnalyzer& getPhaseAnalyzer() { return phaseAnalyzer; }
     PhaseCorrector& getPhaseCorrector() { return phaseCorrector; }
 
-    void triggerAlign();
+    // Alignment state machine
+    void startAlign();      // Called by GUI - transitions to WAITING
+    void cancelAlign();     // Called by GUI - transitions back to IDLE
+    void triggerAlign();    // Internal - runs the actual analysis
+
+    AlignmentState getAlignmentState() const { return alignmentState.load(); }
+    float getAccumulatedSeconds() const { return accumulatedSeconds.load(); }
+    static constexpr float kRequiredSeconds = 7.5f;
+
     void setIsReference (bool isRef);
     bool getIsReference() const { return isReference.load(); }
     void setCorrectionMode (int mode); // 0=T+Phi, 1=Phi, 2=T
@@ -64,6 +81,11 @@ private:
     std::atomic<bool> isReference { false };
     std::atomic<int> correctionMode { 0 }; // 0=T+Phi, 1=Phi, 2=T
     std::atomic<bool> isBypassed { false };
+
+    // Alignment state machine
+    std::atomic<AlignmentState> alignmentState { AlignmentState::IDLE };
+    std::atomic<float> accumulatedSeconds { 0.0f };
+    int accumulatedSamples = 0;
 
     int mySlot = -1;
     double currentSampleRate = 44100.0;

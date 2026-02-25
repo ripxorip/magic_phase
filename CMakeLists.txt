@@ -269,6 +269,83 @@ if(MP_BUILD_CLI_TEST)
     message(STATUS "  IPC Test Tool: ON")
 endif()
 
+# FakeDAW Test Harness
+if(MP_BUILD_CLI_TEST)
+    juce_add_console_app(FakeDAW
+        PRODUCT_NAME "FakeDAW"
+        COMPANY_NAME "MiGiC Music"
+    )
+
+    set(FAKEDAW_SOURCES
+        src/Tools/FakeDAW/FakeDAW.cpp
+        src/Tools/AudioFile.cpp
+        src/PluginProcessor.cpp
+        src/PluginEditor.cpp
+        src/DSP/STFTProcessor.cpp
+        src/DSP/PhaseAnalyzer.cpp
+        src/DSP/PhaseCorrector.cpp
+        src/IPC/SharedState.cpp
+        src/GUI/MainComponent.cpp
+        src/GUI/TrackRow.cpp
+        src/GUI/LookAndFeel.cpp
+    )
+
+    # Platform-specific shared memory
+    if(WIN32)
+        list(APPEND FAKEDAW_SOURCES src/IPC/PlatformSharedMemory_win32.cpp)
+    else()
+        list(APPEND FAKEDAW_SOURCES src/IPC/PlatformSharedMemory_posix.cpp)
+    endif()
+
+    target_sources(FakeDAW PRIVATE ${FAKEDAW_SOURCES})
+
+    target_compile_definitions(FakeDAW PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_STRICT_REFCOUNTEDPTR=1
+        JUCE_DISABLE_JUCE_VERSION_PRINTING=1
+        # Provide plugin name for headless use
+        JucePlugin_Name="Magic Phase"
+    )
+
+    target_include_directories(FakeDAW PRIVATE
+        src
+        src/Tools
+        src/DSP
+        src/IPC
+        src/GUI
+    )
+
+    target_link_libraries(FakeDAW PRIVATE
+        juce::juce_core
+        juce::juce_dsp
+        juce::juce_audio_basics
+        juce::juce_audio_processors
+        juce::juce_data_structures
+        juce::juce_events
+        juce::juce_graphics
+        juce::juce_gui_basics
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+    )
+
+    if(MP_LINUX)
+        target_compile_definitions(FakeDAW PRIVATE MP_LINUX=1)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(FakeDAW PRIVATE -fno-lto)
+            target_link_options(FakeDAW PRIVATE -fno-lto)
+        endif()
+        find_package(Threads REQUIRED)
+        target_link_libraries(FakeDAW PRIVATE Threads::Threads dl rt)
+    endif()
+
+    set_target_properties(FakeDAW PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+
+    message(STATUS "  FakeDAW Test Harness: ON")
+endif()
+
 message(STATUS "Magic Phase Configuration:")
 message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Plugin Formats: ${MP_FORMATS}")
