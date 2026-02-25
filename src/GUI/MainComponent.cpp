@@ -208,6 +208,12 @@ void MainComponent::updateAlignButton()
             alignButton.setColour (juce::TextButton::textColourOffId, MagicColors::bg);
             break;
         }
+
+        case AlignmentState::NO_REF:
+            alignButton.setButtonText ("SET REF FIRST");
+            alignButton.setColour (juce::TextButton::buttonColourId, MagicColors::surface);
+            alignButton.setColour (juce::TextButton::textColourOffId, juce::Colour (255, 100, 100));
+            break;
     }
 }
 
@@ -305,7 +311,7 @@ void MainComponent::onAlignClicked()
 {
     auto state = processor.getAlignmentState();
 
-    if (state == AlignmentState::IDLE || state == AlignmentState::ALIGNED)
+    if (state == AlignmentState::IDLE || state == AlignmentState::ALIGNED || state == AlignmentState::NO_REF)
     {
         // Start alignment process - wait for audio
         processor.startAlign();

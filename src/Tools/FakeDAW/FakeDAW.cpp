@@ -604,6 +604,9 @@ void TriggerAlign::execute (FakeDAW& daw, Logger& log)
 
     track.processor->triggerAlign();
 
+    // Wait for background analysis to complete (analysis runs in background thread)
+    track.processor->waitForAnalysis();
+
     // Capture results
     auto& analyzer = track.processor->getPhaseAnalyzer();
 

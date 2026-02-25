@@ -1,6 +1,8 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
+#include <thread>
+#include <mutex>
 #include "STFTProcessor.h"
 #include "PhaseAnalyzer.h"
 #include "PhaseCorrector.h"
@@ -12,7 +14,8 @@ enum class AlignmentState
     IDLE,       // Ready to start - shows "MAGIC ALIGN"
     WAITING,    // Accumulating audio - shows "▶ PLAY TRACKS X.Xs / 7.5s"
     ANALYZING,  // Running analysis - shows "ANALYZING..."
-    ALIGNED     // Correction active - shows "✓ ALIGNED"
+    ALIGNED,    // Correction active - shows "✓ ALIGNED"
+    NO_REF      // No reference track set - shows "SET REF FIRST"
 };
 
 class MagicPhaseProcessor : public juce::AudioProcessor
@@ -59,6 +62,9 @@ public:
     float getAccumulatedSeconds() const { return accumulatedSeconds.load(); }
     static constexpr float kRequiredSeconds = 7.5f;
 
+    // Wait for background analysis to complete (for testing)
+    void waitForAnalysis();
+
     void setIsReference (bool isRef);
     bool getIsReference() const { return isReference.load(); }
     void setCorrectionMode (int mode); // 0=T+Phi, 1=Phi, 2=T
@@ -86,9 +92,27 @@ private:
     std::atomic<AlignmentState> alignmentState { AlignmentState::IDLE };
     std::atomic<float> accumulatedSeconds { 0.0f };
     int accumulatedSamples = 0;
+    std::atomic<bool> needsClear { false };  // Signal audio thread to clear frames
+    AlignmentState lastSeenState { AlignmentState::IDLE };  // For detecting state changes on audio thread
 
     int mySlot = -1;
     double currentSampleRate = 44100.0;
+    uint32_t lastSyncCounter = 0;  // Track sync requests from targets
+
+    // Background analysis thread
+    std::thread analysisThread;
+    std::mutex analysisMutex;
+    std::atomic<bool> analysisComplete { false };
+    std::atomic<bool> shouldStopThread { false };
+
+    // Pending results from background analysis (protected by analysisMutex)
+    float pendingDelaySamples = 0.0f;
+    bool pendingPolarityInvert = false;
+    std::array<float, 2049> pendingPhaseCorrection {};
+
+    void runAnalysisInBackground();
+    void applyPendingResults();
+    bool isDawPlaying() const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MagicPhaseProcessor)
 };

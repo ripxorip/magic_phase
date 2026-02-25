@@ -19,6 +19,7 @@ struct SharedHeader
     std::atomic<uint32_t> numInstances { 0 };
     std::atomic<int32_t> referenceSlot { -1 };
     uint32_t sampleRate { 44100 };
+    std::atomic<uint32_t> syncCounter { 0 };           // Incremented when target wants fresh capture
 };
 
 struct InstanceSlot
@@ -80,6 +81,11 @@ public:
     // Reference STFT frame sharing
     void writeReferenceFrame (const std::complex<float>* frame, int numBins);
     std::vector<std::vector<std::complex<float>>> readReferenceFrames() const;
+    void clearReferenceBuffer();
+
+    // Sync mechanism - target signals reference to start fresh capture
+    void requestSync();
+    uint32_t getSyncCounter() const;
 
     // Instance data
     void updateInstanceData (int slot, float delaySamples, float delayMs,

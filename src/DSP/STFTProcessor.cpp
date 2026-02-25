@@ -71,16 +71,19 @@ void STFTProcessor::processFrame (FrameCallback& callback)
     // Convert to std::complex for callback
     auto* complexData = reinterpret_cast<std::complex<float>*> (fftData.data());
 
-    // Store frame for analysis (circular buffer)
-    if (accumulatedFrames.size() < kMaxAccumulatedFrames)
+    // Store frame for analysis (circular buffer) - only when accumulation enabled
+    if (shouldAccumulate)
     {
-        accumulatedFrames.emplace_back (complexData, complexData + kNumBins);
-    }
-    else
-    {
-        // Overwrite oldest frame in circular fashion
-        accumulatedFrames[accumulatedFrameWriteIdx].assign (complexData, complexData + kNumBins);
-        accumulatedFrameWriteIdx = (accumulatedFrameWriteIdx + 1) % kMaxAccumulatedFrames;
+        if (accumulatedFrames.size() < kMaxAccumulatedFrames)
+        {
+            accumulatedFrames.emplace_back (complexData, complexData + kNumBins);
+        }
+        else
+        {
+            // Overwrite oldest frame in circular fashion
+            accumulatedFrames[accumulatedFrameWriteIdx].assign (complexData, complexData + kNumBins);
+            accumulatedFrameWriteIdx = (accumulatedFrameWriteIdx + 1) % kMaxAccumulatedFrames;
+        }
     }
 
     // User callback for frequency-domain processing

@@ -11,6 +11,11 @@ MagicPhaseProcessor::MagicPhaseProcessor()
 
 MagicPhaseProcessor::~MagicPhaseProcessor()
 {
+    // Stop analysis thread if running
+    shouldStopThread.store (true);
+    if (analysisThread.joinable())
+        analysisThread.join();
+
     if (mySlot >= 0)
         sharedState.deregisterInstance (mySlot);
 }
@@ -79,12 +84,46 @@ void MagicPhaseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     auto* channelData = buffer.getWritePointer (0);
     const int numSamples = buffer.getNumSamples();
 
+    // Check if background analysis completed and apply results
+    if (analysisComplete.load())
+    {
+        applyPendingResults();
+        analysisComplete.store (false);
+        alignmentState.store (AlignmentState::ALIGNED);
+    }
+
+    // Detect state transition to WAITING and clear frames
+    AlignmentState currentState = alignmentState.load();
+    if (currentState == AlignmentState::WAITING && lastSeenState != AlignmentState::WAITING)
+    {
+        stftProcessor.clearAccumulatedFrames();
+        needsClear.store (false);
+    }
+    lastSeenState = currentState;
+
+    const bool playing = isDawPlaying();
+
     if (isReference.load())
     {
-        // Reference: write STFT frames to shared memory
-        stftProcessor.processBlock (channelData, numSamples, [this] (std::complex<float>* frame, int numBins) {
-            sharedState.writeReferenceFrame (frame, numBins);
-        });
+        // Check if a target requested sync (fresh capture)
+        uint32_t currentSync = sharedState.getSyncCounter();
+        if (currentSync != lastSyncCounter)
+        {
+            lastSyncCounter = currentSync;
+            sharedState.clearReferenceBuffer();
+        }
+
+        // Reference: write STFT frames to shared memory (only when playing)
+        if (playing)
+        {
+            stftProcessor.processBlock (channelData, numSamples, [this] (std::complex<float>* frame, int numBins) {
+                sharedState.writeReferenceFrame (frame, numBins);
+            });
+        }
+        else
+        {
+            stftProcessor.processBlock (channelData, numSamples, nullptr);
+        }
         sharedState.setReferenceSlot (mySlot);
     }
     else if (isBypassed.load())
@@ -99,19 +138,22 @@ void MagicPhaseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
         if (state == AlignmentState::WAITING)
         {
-            // Accumulating audio - just process STFT without correction
+            // Only accumulate frames when DAW is playing
+            stftProcessor.setAccumulateFrames (playing);
             stftProcessor.processBlock (channelData, numSamples, nullptr);
 
-            // Track accumulated time
-            accumulatedSamples += numSamples;
-            float seconds = static_cast<float> (accumulatedSamples) / static_cast<float> (currentSampleRate);
-            accumulatedSeconds.store (seconds);
-
-            // Auto-trigger analysis when we have enough audio
-            if (seconds >= kRequiredSeconds)
+            if (playing)
             {
-                alignmentState.store (AlignmentState::ANALYZING);
-                triggerAlign();
+                accumulatedSamples += numSamples;
+                float seconds = static_cast<float> (accumulatedSamples) / static_cast<float> (currentSampleRate);
+                accumulatedSeconds.store (seconds);
+
+                // Auto-trigger analysis when we have enough audio
+                if (seconds >= kRequiredSeconds)
+                {
+                    alignmentState.store (AlignmentState::ANALYZING);
+                    triggerAlign();
+                }
             }
         }
         else if (state == AlignmentState::ALIGNED)
@@ -172,13 +214,16 @@ void MagicPhaseProcessor::setStateInformation (const void* data, int sizeInBytes
 
 void MagicPhaseProcessor::startAlign()
 {
+    // Signal audio thread to clear frames (thread-safe)
+    needsClear.store (true);
+
+    // Signal reference track to also start fresh capture
+    sharedState.requestSync();
+
     // Transition to WAITING state - start accumulating audio
     alignmentState.store (AlignmentState::WAITING);
     accumulatedSamples = 0;
     accumulatedSeconds.store (0.0f);
-
-    // Clear accumulated frames for fresh analysis
-    stftProcessor.clearAccumulatedFrames();
 }
 
 void MagicPhaseProcessor::cancelAlign()
@@ -191,15 +236,33 @@ void MagicPhaseProcessor::cancelAlign()
 
 void MagicPhaseProcessor::triggerAlign()
 {
-    // Read reference STFT frames from shared memory and run analysis
+    // Check for valid reference
     int refSlot = sharedState.getReferenceSlot();
-    if (refSlot < 0 || refSlot == mySlot)
+    if (refSlot < 0)
     {
-        // No valid reference - go back to IDLE
+        // No reference track set
+        alignmentState.store (AlignmentState::NO_REF);
+        return;
+    }
+    if (refSlot == mySlot)
+    {
+        // This track IS the reference - can't align to self
         alignmentState.store (AlignmentState::IDLE);
         return;
     }
 
+    // Stop any existing analysis thread
+    shouldStopThread.store (true);
+    if (analysisThread.joinable())
+        analysisThread.join();
+
+    // Start new background analysis
+    shouldStopThread.store (false);
+    analysisThread = std::thread (&MagicPhaseProcessor::runAnalysisInBackground, this);
+}
+
+void MagicPhaseProcessor::runAnalysisInBackground()
+{
     // Get coherence threshold and max correction from parameters
     float cohThreshold = apvts.getRawParameterValue ("coherenceThreshold")->load();
     float maxCorr = apvts.getRawParameterValue ("maxCorrection")->load();
@@ -207,30 +270,83 @@ void MagicPhaseProcessor::triggerAlign()
     phaseAnalyzer.setCoherenceThreshold (cohThreshold);
     phaseAnalyzer.setMaxCorrectionDeg (maxCorr);
 
-    // Analyze: accumulate phase differences from reference STFT frames
+    // Read reference frames and analyze
     auto refFrames = sharedState.readReferenceFrames();
-    phaseAnalyzer.analyze (refFrames, stftProcessor.getAccumulatedFrames());
+    auto targetFrames = stftProcessor.getAccumulatedFrames();
 
-    // Transfer analysis results to corrector
-    phaseCorrector.setDelaySamples (phaseAnalyzer.getDelaySamples());
-    phaseCorrector.setPolarityInvert (phaseAnalyzer.getPolarityInverted());
-    phaseCorrector.setPhaseCorrection (phaseAnalyzer.getPhaseCorrection());
-    phaseCorrector.setTimeCorrectionOn (true);
-    phaseCorrector.setPhaseCorrectionOn (true);
+    phaseAnalyzer.analyze (refFrames, targetFrames);
+
+    if (shouldStopThread.load())
+        return;
+
+    // Store results in pending variables (protected by mutex)
+    {
+        std::lock_guard<std::mutex> lock (analysisMutex);
+        pendingDelaySamples = phaseAnalyzer.getDelaySamples();
+        pendingPolarityInvert = phaseAnalyzer.getPolarityInverted();
+
+        const auto& phaseCorr = phaseAnalyzer.getPhaseCorrection();
+        size_t copySize = std::min (phaseCorr.size(), pendingPhaseCorrection.size());
+        std::copy (phaseCorr.begin(), phaseCorr.begin() + copySize, pendingPhaseCorrection.begin());
+    }
 
     // Update shared state
     if (mySlot >= 0)
         sharedState.setInstanceAligned (mySlot);
 
-    // Transition to ALIGNED state - correction is now active
-    alignmentState.store (AlignmentState::ALIGNED);
+    // Signal completion (audio thread will pick this up)
+    analysisComplete.store (true);
+}
+
+void MagicPhaseProcessor::applyPendingResults()
+{
+    std::lock_guard<std::mutex> lock (analysisMutex);
+
+    phaseCorrector.setDelaySamples (pendingDelaySamples);
+    phaseCorrector.setPolarityInvert (pendingPolarityInvert);
+
+    std::vector<float> phaseCorr (pendingPhaseCorrection.begin(), pendingPhaseCorrection.end());
+    phaseCorrector.setPhaseCorrection (phaseCorr);
+    phaseCorrector.setTimeCorrectionOn (true);
+    phaseCorrector.setPhaseCorrectionOn (true);
+}
+
+bool MagicPhaseProcessor::isDawPlaying() const
+{
+    auto* playHead = getPlayHead();
+    if (playHead == nullptr)
+        return true; // Assume playing if no playhead (standalone, tests, etc.)
+
+    auto position = playHead->getPosition();
+    if (! position.hasValue())
+        return true; // Assume playing if position unavailable
+
+    return position->getIsPlaying();
+}
+
+void MagicPhaseProcessor::waitForAnalysis()
+{
+    // Wait for analysis thread to complete (for testing/FakeDAW)
+    if (analysisThread.joinable())
+        analysisThread.join();
+
+    // Apply results immediately if available
+    if (analysisComplete.load())
+    {
+        applyPendingResults();
+        analysisComplete.store (false);
+        alignmentState.store (AlignmentState::ALIGNED);
+    }
 }
 
 void MagicPhaseProcessor::setIsReference (bool isRef)
 {
     isReference.store (isRef);
     if (isRef && mySlot >= 0)
+    {
         sharedState.setReferenceSlot (mySlot);
+        lastSyncCounter = sharedState.getSyncCounter();
+    }
 }
 
 void MagicPhaseProcessor::setCorrectionMode (int mode)

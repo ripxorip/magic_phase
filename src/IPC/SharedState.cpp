@@ -250,6 +250,27 @@ std::vector<std::vector<std::complex<float>>> SharedState::readReferenceFrames()
     return result;
 }
 
+void SharedState::clearReferenceBuffer()
+{
+    if (layout == nullptr)
+        return;
+    layout->refBuffer.writePos.store (0);
+}
+
+void SharedState::requestSync()
+{
+    if (layout == nullptr)
+        return;
+    layout->header.syncCounter.fetch_add (1);
+}
+
+uint32_t SharedState::getSyncCounter() const
+{
+    if (layout == nullptr)
+        return 0;
+    return layout->header.syncCounter.load();
+}
+
 void SharedState::updateInstanceData (int slot, float delaySamples, float delayMs,
                                       float correlation, float coherence, float phaseDeg,
                                       bool polarityInv, bool timeOn, bool phaseOn,

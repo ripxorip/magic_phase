@@ -21,7 +21,11 @@ public:
 
     // Get accumulated frames for analysis
     const std::vector<std::vector<std::complex<float>>>& getAccumulatedFrames() const { return accumulatedFrames; }
-    void clearAccumulatedFrames() { accumulatedFrames.clear(); }
+    void clearAccumulatedFrames() { accumulatedFrames.clear(); accumulatedFrameWriteIdx = 0; }
+
+    // Control frame accumulation (for analysis)
+    void setAccumulateFrames (bool accumulate) { shouldAccumulate = accumulate; }
+    bool getAccumulateFrames() const { return shouldAccumulate; }
 
     // Latency = FFTSize for proper overlap-add timing
     // (we need all 4 overlapping frames to contribute before reading)
@@ -49,6 +53,7 @@ private:
     std::vector<std::vector<std::complex<float>>> accumulatedFrames;
     static constexpr int kMaxAccumulatedFrames = 512;
     int accumulatedFrameWriteIdx = 0;
+    bool shouldAccumulate = true;  // Whether to store frames for analysis
 
     double sampleRate = 44100.0;
 };
