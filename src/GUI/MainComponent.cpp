@@ -43,17 +43,16 @@ MainComponent::MainComponent (MagicPhaseProcessor& p)
         btn.onClick = [this, mode] { onModeClicked (mode); };
         addAndMakeVisible (btn);
     };
-    setupModeBtn (modeTPhi, 0);
+    setupModeBtn (modeT, 0);
     setupModeBtn (modePhi, 1);
-    setupModeBtn (modeT, 2);
 
     // A/B button
     abButton.setClickingTogglesState (true);
     abButton.onClick = [this] { processor.setBypass (abButton.getToggleState()); };
     addAndMakeVisible (abButton);
 
-    // Initial mode state
-    onModeClicked (0);
+    // Initial mode state - default to Φ
+    onModeClicked (1);
 
     // Timer for GUI refresh (30Hz)
     startTimerHz (30);
@@ -132,15 +131,14 @@ void MainComponent::resized()
     bottomInner.removeFromLeft (12);  // spacing
     alignButton.setBounds (bottomInner.removeFromLeft (160).reduced (0, 0));
 
-    auto rightGroup = bottomInner.removeFromRight (200);
+    auto rightGroup = bottomInner.removeFromRight (160);
     int btnW = 42;
     int btnH = 34;
     int y = rightGroup.getCentreY() - btnH / 2;
 
     abButton.setBounds (rightGroup.getRight() - btnW, y, btnW, btnH);
-    modeT.setBounds (rightGroup.getRight() - btnW - 48, y, btnW, btnH);
-    modePhi.setBounds (rightGroup.getRight() - btnW - 96, y, btnW, btnH);
-    modeTPhi.setBounds (rightGroup.getRight() - btnW - 148, y, 52, btnH);
+    modePhi.setBounds (rightGroup.getRight() - btnW - 48, y, btnW, btnH);
+    modeT.setBounds (rightGroup.getRight() - btnW - 96, y, btnW, btnH);
 
     // Track viewport
     auto trackArea = bounds.reduced (0, 4);
@@ -197,8 +195,8 @@ void MainComponent::updateAlignButton()
         case AlignmentState::ALIGNED:
         {
             // Show results: "✓ ALIGNED  -1.0ms  φ -8°"
-            float delayMs = processor.getPhaseAnalyzer().getDelayMs();
-            float phaseDeg = processor.getPhaseAnalyzer().getPhaseDegrees();
+            float delayMs = processor.getResultDelayMs();
+            float phaseDeg = processor.getResultPhaseDeg();
             juce::String text = juce::String::fromUTF8 ("\xe2\x9c\x93 ALIGNED  ")
                               + juce::String (delayMs, 1) + "ms  "
                               + juce::String::fromUTF8 ("\xcf\x86 ")
@@ -336,7 +334,6 @@ void MainComponent::onModeClicked (int mode)
                        active ? MagicColors::bg : MagicColors::text2);
     };
 
-    setActive (modeTPhi, mode == 0);
+    setActive (modeT, mode == 0);
     setActive (modePhi, mode == 1);
-    setActive (modeT, mode == 2);
 }

@@ -67,13 +67,19 @@ public:
 
     void setIsReference (bool isRef);
     bool getIsReference() const { return isReference.load(); }
-    void setCorrectionMode (int mode); // 0=T+Phi, 1=Phi, 2=T
+    void setCorrectionMode (int mode); // 0=T, 1=Φ (T+Phase)
     int getCorrectionMode() const { return correctionMode.load(); }
     void setBypass (bool bypassed);
     bool getBypassed() const { return isBypassed.load(); }
 
     int getMySlot() const { return mySlot; }
     juce::String getTrackName() const;
+
+    // Post-analysis results for GUI display
+    float getResultDelayMs() const { return resultDelayMs.load(); }
+    float getResultPhaseDeg() const { return resultPhaseDeg.load(); }
+    float getResultCoherence() const { return resultCoherence.load(); }
+    float getResultCorrelation() const { return resultCorrelation.load(); }
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -85,7 +91,7 @@ private:
     SharedState sharedState;
 
     std::atomic<bool> isReference { false };
-    std::atomic<int> correctionMode { 0 }; // 0=T+Phi, 1=Phi, 2=T
+    std::atomic<int> correctionMode { 1 }; // 0=T, 1=Φ (T+Phase)
     std::atomic<bool> isBypassed { false };
 
     // Alignment state machine
@@ -99,6 +105,16 @@ private:
     double currentSampleRate = 44100.0;
     uint32_t lastSyncCounter = 0;  // Track sync requests from targets
 
+    // Sync handshake for raw sample accumulation
+    uint32_t pendingSyncCounter = 0;      // The syncCounter value we're waiting for ack
+    bool rawAccumActive = false;          // True once sync is acknowledged and we're accumulating
+    int64_t targetRawStartSample = 0;     // Playhead position when target started raw accumulation
+    int64_t totalSamplesProcessed = 0;    // Fallback counter when no playhead available
+
+    // Raw sample accumulation for target track
+    std::vector<float> localRawSamples;
+    static constexpr int kMaxLocalRawSamples = 720000;  // 15s @ 48kHz
+
     // Background analysis thread
     std::thread analysisThread;
     std::mutex analysisMutex;
@@ -110,9 +126,19 @@ private:
     bool pendingPolarityInvert = false;
     std::array<float, 2049> pendingPhaseCorrection {};
 
+    // Post-analysis display values (written by analysis thread, read by GUI + processBlock)
+    std::atomic<float> resultDelaySamples { 0.0f };
+    std::atomic<float> resultDelayMs { 0.0f };
+    std::atomic<float> resultCorrelation { 0.0f };
+    std::atomic<float> resultCoherence { 0.0f };
+    std::atomic<float> resultPhaseDeg { 0.0f };
+    std::atomic<bool> resultPolarityInv { false };
+    float resultSpectralBands[48] {};
+
     void runAnalysisInBackground();
     void applyPendingResults();
     bool isDawPlaying() const;
+    int64_t getPlayheadSamplePos() const;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MagicPhaseProcessor)
 };

@@ -1,5 +1,8 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <fstream>
+#include <ctime>
+#include <cmath>
 
 MagicPhaseProcessor::MagicPhaseProcessor()
     : AudioProcessor (BusesProperties()
@@ -42,6 +45,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout MagicPhaseProcessor::createP
 void MagicPhaseProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentSampleRate = sampleRate;
+    totalSamplesProcessed = 0;
 
     stftProcessor.prepare (sampleRate, samplesPerBlock);
     phaseAnalyzer.prepare (sampleRate);
@@ -83,6 +87,7 @@ void MagicPhaseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
     auto* channelData = buffer.getWritePointer (0);
     const int numSamples = buffer.getNumSamples();
+    totalSamplesProcessed += numSamples;
 
     // Check if background analysis completed and apply results
     if (analysisComplete.load())
@@ -111,11 +116,16 @@ void MagicPhaseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         {
             lastSyncCounter = currentSync;
             sharedState.clearReferenceBuffer();
+            sharedState.clearRawSampleBuffer();
+
+            // Record playhead position and acknowledge sync
+            sharedState.acknowledgeSyncRequest (getPlayheadSamplePos());
         }
 
-        // Reference: write STFT frames to shared memory (only when playing)
+        // Reference: write STFT frames + raw samples to shared memory (only when playing)
         if (playing)
         {
+            sharedState.writeRawSamples (channelData, numSamples);
             stftProcessor.processBlock (channelData, numSamples, [this] (std::complex<float>* frame, int numBins) {
                 sharedState.writeReferenceFrame (frame, numBins);
             });
@@ -138,11 +148,33 @@ void MagicPhaseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
 
         if (state == AlignmentState::WAITING)
         {
-            // Only accumulate frames when DAW is playing
+            if (playing)
+            {
+                // Wait for reference to acknowledge sync before accumulating raw samples
+                if (! rawAccumActive)
+                {
+                    if (sharedState.isSyncAcknowledged (pendingSyncCounter))
+                    {
+                        rawAccumActive = true;
+                        targetRawStartSample = getPlayheadSamplePos();
+                    }
+                }
+
+                // Accumulate raw samples BEFORE STFT (which modifies channelData in-place)
+                if (rawAccumActive)
+                {
+                    size_t space = static_cast<size_t> (kMaxLocalRawSamples) - localRawSamples.size();
+                    int toAdd = std::min (numSamples, static_cast<int> (space));
+                    if (toAdd > 0)
+                        localRawSamples.insert (localRawSamples.end(), channelData, channelData + toAdd);
+                }
+            }
+
+            // STFT processBlock modifies channelData via overlap-add
             stftProcessor.setAccumulateFrames (playing);
             stftProcessor.processBlock (channelData, numSamples, nullptr);
 
-            if (playing)
+            if (playing && rawAccumActive)
             {
                 accumulatedSamples += numSamples;
                 float seconds = static_cast<float> (accumulatedSamples) / static_cast<float> (currentSampleRate);
@@ -158,10 +190,10 @@ void MagicPhaseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         }
         else if (state == AlignmentState::ALIGNED)
         {
-            // Apply correction
+            // Apply correction: T always on, phase only in Φ mode
             int mode = correctionMode.load();
-            bool applyTime = (mode == 0 || mode == 2);
-            bool applyPhase = (mode == 0 || mode == 1);
+            bool applyTime = true;           // T is ALWAYS applied
+            bool applyPhase = (mode == 1);   // Phase only in Φ mode
 
             stftProcessor.processBlock (channelData, numSamples, [this, applyTime, applyPhase] (std::complex<float>* frame, int numBins) {
                 if (applyTime)
@@ -177,19 +209,19 @@ void MagicPhaseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         }
     }
 
-    // Update shared state with analysis data
+    // Update shared state with stored analysis results
     if (mySlot >= 0)
     {
         sharedState.updateInstanceData (mySlot,
-            phaseAnalyzer.getDelaySamples(),
-            phaseAnalyzer.getDelayMs(),
-            phaseAnalyzer.getCorrelation(),
-            phaseAnalyzer.getOverallCoherence(),
-            phaseAnalyzer.getPhaseDegrees(),
-            phaseAnalyzer.getPolarityInverted(),
+            resultDelaySamples.load(),
+            resultDelayMs.load(),
+            resultCorrelation.load(),
+            resultCoherence.load(),
+            resultPhaseDeg.load(),
+            resultPolarityInv.load(),
             phaseCorrector.getTimeCorrectionOn(),
             phaseCorrector.getPhaseCorrectionOn(),
-            phaseAnalyzer.getSpectralBands());
+            resultSpectralBands);
     }
 }
 
@@ -217,8 +249,14 @@ void MagicPhaseProcessor::startAlign()
     // Signal audio thread to clear frames (thread-safe)
     needsClear.store (true);
 
+    // Clear local raw sample buffer
+    localRawSamples.clear();
+    rawAccumActive = false;
+    targetRawStartSample = 0;
+
     // Signal reference track to also start fresh capture
     sharedState.requestSync();
+    pendingSyncCounter = sharedState.getSyncCounter();
 
     // Transition to WAITING state - start accumulating audio
     alignmentState.store (AlignmentState::WAITING);
@@ -267,32 +305,195 @@ void MagicPhaseProcessor::runAnalysisInBackground()
     float cohThreshold = apvts.getRawParameterValue ("coherenceThreshold")->load();
     float maxCorr = apvts.getRawParameterValue ("maxCorrection")->load();
 
-    phaseAnalyzer.setCoherenceThreshold (cohThreshold);
-    phaseAnalyzer.setMaxCorrectionDeg (maxCorr);
+    // =========================================================================
+    // Stage 1: Read raw samples
+    // =========================================================================
+    int analyzeWindowSamples = static_cast<int> (kRequiredSeconds * currentSampleRate);
+    auto refRaw = sharedState.readRawSamples (analyzeWindowSamples);
+    auto tarRaw = localRawSamples;  // copy from local accumulation
 
-    // Read reference frames and analyze
-    auto refFrames = sharedState.readReferenceFrames();
-    auto targetFrames = stftProcessor.getAccumulatedFrames();
+    if (refRaw.empty() || tarRaw.empty())
+    {
+        alignmentState.store (AlignmentState::IDLE);
+        return;
+    }
 
-    phaseAnalyzer.analyze (refFrames, targetFrames);
+    // Stop accumulating STFT frames
+    stftProcessor.setAccumulateFrames (false);
 
     if (shouldStopThread.load())
         return;
 
-    // Store results in pending variables (protected by mutex)
+    // =========================================================================
+    // Stage 2a: Time-domain delay detection on raw samples
+    //
+    // rawDelay = trueDelay + syncOffset
+    // We know syncOffset from playhead timestamps recorded during handshake.
+    // trueDelay = rawDelay - syncOffset
+    // =========================================================================
+    PhaseAnalyzer rawDelayAnalyzer;
+    rawDelayAnalyzer.prepare (currentSampleRate);
+    rawDelayAnalyzer.detectDelayTimeDomain (refRaw, tarRaw);
+
+    float rawDelay = rawDelayAnalyzer.getDelaySamples();
+    float rawCorr = rawDelayAnalyzer.getCorrelation();
+    bool rawPolarityInv = rawDelayAnalyzer.getPolarityInverted();
+
+    // Compute sync offset from playhead timestamps
+    int64_t refStart = sharedState.getRefRawStartSample();
+    int64_t syncOffset = targetRawStartSample - refStart;
+
+    // True delay = raw delay minus the sync offset between when the two plugins
+    // started accumulating. This is the actual audio delay we need to correct.
+    float trueDelay = rawDelay - static_cast<float> (syncOffset);
+    float trueDelayMs = (trueDelay / static_cast<float> (currentSampleRate)) * 1000.0f;
+
+    if (shouldStopThread.load())
+        return;
+
+    // =========================================================================
+    // Stage 2b: Integer-shift + polarity-flip target to create time-aligned version
+    // Uses rawDelay (includes sync offset) because refRaw and tarRaw have that offset
+    // =========================================================================
+    int delayInt = static_cast<int> (std::round (rawDelay));
+    float polaritySign = rawPolarityInv ? -1.0f : 1.0f;
+    int tarLen = static_cast<int> (tarRaw.size());
+
+    std::vector<float> tarAligned (static_cast<size_t> (tarLen), 0.0f);
+    for (int i = 0; i < tarLen; ++i)
+    {
+        int srcIdx = i + delayInt;
+        if (srcIdx >= 0 && srcIdx < tarLen)
+            tarAligned[static_cast<size_t> (i)] = tarRaw[static_cast<size_t> (srcIdx)] * polaritySign;
+    }
+
+    if (shouldStopThread.load())
+        return;
+
+    // =========================================================================
+    // Stage 2c: Re-STFT ref + aligned-target, then analyzeSpectralPhase
+    // =========================================================================
+    constexpr int kBlockSize = 128;
+
+    STFTProcessor refSTFT2;
+    STFTProcessor corrSTFT2;
+    refSTFT2.prepare (currentSampleRate, kBlockSize);
+    corrSTFT2.prepare (currentSampleRate, kBlockSize);
+
+    std::vector<std::vector<std::complex<float>>> refFrames2;
+    std::vector<std::vector<std::complex<float>>> corrFrames2;
+
+    auto collectRef = [&refFrames2] (std::complex<float>* frame, int numBins) {
+        refFrames2.emplace_back (frame, frame + numBins);
+    };
+    auto collectCorr = [&corrFrames2] (std::complex<float>* frame, int numBins) {
+        corrFrames2.emplace_back (frame, frame + numBins);
+    };
+
+    int analyzeLen = static_cast<int> (std::min (refRaw.size(), tarAligned.size()));
+    for (int pos = 0; pos < analyzeLen; pos += kBlockSize)
+    {
+        if (shouldStopThread.load())
+            return;
+
+        int thisBlock = std::min (kBlockSize, analyzeLen - pos);
+        refSTFT2.processBlock (refRaw.data() + pos, thisBlock, collectRef);
+        corrSTFT2.processBlock (tarAligned.data() + pos, thisBlock, collectCorr);
+    }
+
+    PhaseAnalyzer spectralAnalyzer;
+    spectralAnalyzer.prepare (currentSampleRate);
+    spectralAnalyzer.setCoherenceThreshold (cohThreshold);
+    spectralAnalyzer.setMaxCorrectionDeg (maxCorr);
+    spectralAnalyzer.analyzeSpectralPhase (refFrames2, corrFrames2);
+
+    if (shouldStopThread.load())
+        return;
+
+    float coherence = spectralAnalyzer.getOverallCoherence();
+    float phaseDeg = spectralAnalyzer.getPhaseDegrees();
+    const auto& phaseCorr = spectralAnalyzer.getPhaseCorrection();
+
+    // Store display values for GUI (atomic, safe to read from any thread)
+    resultDelaySamples.store (trueDelay);
+    resultDelayMs.store (trueDelayMs);
+    resultCorrelation.store (rawCorr);
+    resultCoherence.store (coherence);
+    resultPhaseDeg.store (phaseDeg);
+    resultPolarityInv.store (rawPolarityInv);
+    std::memcpy (resultSpectralBands, spectralAnalyzer.getSpectralBands(), sizeof (resultSpectralBands));
+
+    // =========================================================================
+    // Diagnostic logging
+    // =========================================================================
+    {
+        auto desktopPath = juce::File::getSpecialLocation (juce::File::userDesktopDirectory)
+                               .getChildFile ("magic_phase_log.txt");
+
+        std::ofstream logFile (desktopPath.getFullPathName().toStdString(), std::ios::app);
+        if (logFile.is_open())
+        {
+            std::time_t now = std::time (nullptr);
+            char timeBuf[64];
+            std::strftime (timeBuf, sizeof (timeBuf), "%Y-%m-%d %H:%M:%S", std::localtime (&now));
+
+            float avgPhaseDeg = 0.0f;
+            if (! phaseCorr.empty())
+            {
+                float sum = 0.0f;
+                for (auto v : phaseCorr)
+                    sum += v;
+                avgPhaseDeg = (sum / static_cast<float> (phaseCorr.size())) * 180.0f / 3.14159265f;
+            }
+
+            auto computeRms = [] (const std::vector<float>& buf) -> float {
+                if (buf.empty()) return 0.0f;
+                double sum = 0.0;
+                for (auto s : buf) sum += static_cast<double> (s) * s;
+                return static_cast<float> (std::sqrt (sum / buf.size()));
+            };
+
+            logFile << "[" << timeBuf << "] === Magic Phase Analysis ===\n"
+                    << "  Ref raw samples: " << refRaw.size()
+                    << " (" << (static_cast<float> (refRaw.size()) / static_cast<float> (currentSampleRate)) << "s)"
+                    << " RMS=" << computeRms (refRaw) << "\n"
+                    << "  Target raw samples: " << tarRaw.size()
+                    << " (" << (static_cast<float> (tarRaw.size()) / static_cast<float> (currentSampleRate)) << "s)"
+                    << " RMS=" << computeRms (tarRaw) << "\n"
+                    << "  Raw delay: " << rawDelay << " samples corr=" << rawCorr
+                    << " pol=" << (rawPolarityInv ? "INV" : "N") << "\n"
+                    << "  Sync offset: " << syncOffset << " samples"
+                    << " (refStart=" << refStart << " targetStart=" << targetRawStartSample << ")\n"
+                    << "  True delay: " << trueDelay << " samples (" << trueDelayMs << " ms)\n"
+                    << "  Re-STFT frames: " << refFrames2.size() << " ref, " << corrFrames2.size() << " target\n"
+                    << "  Overall coherence: " << coherence << "\n"
+                    << "  Avg phase correction: " << avgPhaseDeg << " deg\n"
+                    << "  --- Compare with MagicPhaseTest: delay~49, corr~0.86, coh~0.78 ---\n\n";
+        }
+    }
+
+    // =========================================================================
+    // Store results — use trueDelay for real-time correction
+    // =========================================================================
     {
         std::lock_guard<std::mutex> lock (analysisMutex);
-        pendingDelaySamples = phaseAnalyzer.getDelaySamples();
-        pendingPolarityInvert = phaseAnalyzer.getPolarityInverted();
+        pendingDelaySamples = trueDelay;
+        pendingPolarityInvert = rawPolarityInv;
 
-        const auto& phaseCorr = phaseAnalyzer.getPhaseCorrection();
         size_t copySize = std::min (phaseCorr.size(), pendingPhaseCorrection.size());
         std::copy (phaseCorr.begin(), phaseCorr.begin() + copySize, pendingPhaseCorrection.begin());
+        if (copySize < pendingPhaseCorrection.size())
+            std::fill (pendingPhaseCorrection.begin() + copySize, pendingPhaseCorrection.end(), 0.0f);
     }
 
     // Update shared state
     if (mySlot >= 0)
+    {
+        sharedState.updateInstanceData (mySlot,
+            trueDelay, trueDelayMs, rawCorr, coherence, phaseDeg,
+            rawPolarityInv, true, true, spectralAnalyzer.getSpectralBands());
         sharedState.setInstanceAligned (mySlot);
+    }
 
     // Signal completion (audio thread will pick this up)
     analysisComplete.store (true);
@@ -313,15 +514,28 @@ void MagicPhaseProcessor::applyPendingResults()
 
 bool MagicPhaseProcessor::isDawPlaying() const
 {
-    auto* playHead = getPlayHead();
-    if (playHead == nullptr)
+    auto* ph = getPlayHead();
+    if (ph == nullptr)
         return true; // Assume playing if no playhead (standalone, tests, etc.)
 
-    auto position = playHead->getPosition();
+    auto position = ph->getPosition();
     if (! position.hasValue())
         return true; // Assume playing if position unavailable
 
     return position->getIsPlaying();
+}
+
+int64_t MagicPhaseProcessor::getPlayheadSamplePos() const
+{
+    auto* ph = getPlayHead();
+    if (ph != nullptr)
+    {
+        auto position = ph->getPosition();
+        if (position.hasValue() && position->getTimeInSamples().hasValue())
+            return *position->getTimeInSamples();
+    }
+    // Fallback: use total samples processed counter (works for FakeDAW/tests)
+    return totalSamplesProcessed;
 }
 
 void MagicPhaseProcessor::waitForAnalysis()

@@ -257,10 +257,56 @@ void SharedState::clearReferenceBuffer()
     layout->refBuffer.writePos.store (0);
 }
 
+void SharedState::writeRawSamples (const float* data, int numSamples)
+{
+    if (layout == nullptr || data == nullptr || numSamples <= 0)
+        return;
+
+    uint32_t wp = layout->rawSampleBuffer.writePos.load();
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        uint32_t pos = (wp + static_cast<uint32_t> (i)) % kMaxRawSamples;
+        layout->rawSampleBuffer.samples[pos] = data[i];
+    }
+
+    layout->rawSampleBuffer.writePos.store (wp + static_cast<uint32_t> (numSamples));
+}
+
+std::vector<float> SharedState::readRawSamples (int maxSamples) const
+{
+    if (layout == nullptr)
+        return {};
+
+    uint32_t wp = layout->rawSampleBuffer.writePos.load();
+    uint32_t available = std::min (wp, static_cast<uint32_t> (kMaxRawSamples));
+    uint32_t toRead = std::min (available, static_cast<uint32_t> (maxSamples));
+
+    if (toRead == 0)
+        return {};
+
+    // Read from position 0 (start of buffer since last clear), not from the end.
+    // The buffer is cleared at sync, so position 0 is the first sample after sync.
+    // Reading from the end would shift if the reference keeps writing during analysis.
+    std::vector<float> result (toRead);
+    for (uint32_t i = 0; i < toRead; ++i)
+        result[i] = layout->rawSampleBuffer.samples[i % kMaxRawSamples];
+
+    return result;
+}
+
+void SharedState::clearRawSampleBuffer()
+{
+    if (layout == nullptr)
+        return;
+    layout->rawSampleBuffer.writePos.store (0);
+}
+
 void SharedState::requestSync()
 {
     if (layout == nullptr)
         return;
+    layout->rawSampleBuffer.writePos.store (0);
     layout->header.syncCounter.fetch_add (1);
 }
 
@@ -269,6 +315,28 @@ uint32_t SharedState::getSyncCounter() const
     if (layout == nullptr)
         return 0;
     return layout->header.syncCounter.load();
+}
+
+void SharedState::acknowledgeSyncRequest (int64_t refStartSample)
+{
+    if (layout == nullptr)
+        return;
+    layout->header.refRawStartSample.store (refStartSample);
+    layout->header.syncAcknowledged.store (layout->header.syncCounter.load());
+}
+
+bool SharedState::isSyncAcknowledged (uint32_t syncValue) const
+{
+    if (layout == nullptr)
+        return false;
+    return layout->header.syncAcknowledged.load() >= syncValue;
+}
+
+int64_t SharedState::getRefRawStartSample() const
+{
+    if (layout == nullptr)
+        return 0;
+    return layout->header.refRawStartSample.load();
 }
 
 void SharedState::updateInstanceData (int slot, float delaySamples, float delayMs,

@@ -24,6 +24,7 @@ endif()
 option(MP_BUILD_VST3 "Build VST3 plugin" ON)
 option(MP_BUILD_STANDALONE "Build Standalone application" ON)
 option(MP_BUILD_CLI_TEST "Build CLI test tool" OFF)
+option(MP_COPY_AFTER_BUILD "Copy plugin to system folder after build" OFF)
 
 # LTO off on Linux
 if(NOT DEFINED CACHE{MP_ENABLE_LTO})
@@ -73,7 +74,7 @@ juce_add_plugin(MagicPhase
     NEEDS_MIDI_OUTPUT FALSE
     IS_MIDI_EFFECT FALSE
     EDITOR_WANTS_KEYBOARD_FOCUS FALSE
-    COPY_PLUGIN_AFTER_BUILD FALSE
+    COPY_PLUGIN_AFTER_BUILD ${MP_COPY_AFTER_BUILD}
     PLUGIN_MANUFACTURER_CODE Manu
     PLUGIN_CODE MgPh
     FORMATS ${MP_FORMATS}

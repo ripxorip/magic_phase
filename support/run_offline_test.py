@@ -30,7 +30,12 @@ from pathlib import Path
 
 # ── Project root is one level up from support/ ──────────────────────────
 ROOT = Path(__file__).resolve().parent.parent
-CPP_BIN = ROOT / "build" / "bin" / "MagicPhaseTest"
+CPP_BIN_CANDIDATES = [
+    ROOT / "build" / "bin" / "MagicPhaseTest",                  # Linux/macOS single-config
+    ROOT / "build" / "bin" / "Release" / "MagicPhaseTest.exe",  # MSVC Release
+    ROOT / "build" / "bin" / "Debug" / "MagicPhaseTest.exe",    # MSVC Debug
+]
+CPP_BIN = next((p for p in CPP_BIN_CANDIDATES if p.exists()), CPP_BIN_CANDIDATES[0])
 PY_ALIGN = ROOT / "python" / "align_files.py"
 PY_PLOT = ROOT / "python" / "plot_cpp_results.py"
 OUTPUT_BASE = ROOT / "output" / "offline_test"
@@ -211,11 +216,11 @@ def print_comparison(results, output_file=None):
         if r is None:
             continue
 
-        p(f"\n{'─' * 90}")
+        p(f"\n{'-' * 90}")
         p(f"  {r['name']}")
         p(f"  ref: {r['ref']}")
         p(f"  tar: {r['target']}")
-        p(f"{'─' * 90}")
+        p(f"{'-' * 90}")
 
         cpp = r.get('cpp', {})
         py = r.get('python', {})
@@ -231,7 +236,7 @@ def print_comparison(results, output_file=None):
         ]
 
         p(f"  {'Metric':<25s} {'C++':>15s} {'Python':>15s} {'Delta':>12s}")
-        p(f"  {'─'*25} {'─'*15} {'─'*15} {'─'*12}")
+        p(f"  {'-'*25} {'-'*15} {'-'*15} {'-'*12}")
 
         for label, key, fmt in rows:
             cv = cpp.get(key)

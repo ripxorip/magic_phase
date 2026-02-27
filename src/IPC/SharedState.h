@@ -8,7 +8,7 @@
 
 // Magic cookie to detect corrupted/incompatible shared memory
 static constexpr uint32_t kMagicCookie = 0x4D475048;  // "MGPH"
-static constexpr uint32_t kLayoutVersion = 1;
+static constexpr uint32_t kLayoutVersion = 2;
 
 // Shared memory layout for inter-instance communication
 struct SharedHeader
@@ -20,6 +20,8 @@ struct SharedHeader
     std::atomic<int32_t> referenceSlot { -1 };
     uint32_t sampleRate { 44100 };
     std::atomic<uint32_t> syncCounter { 0 };           // Incremented when target wants fresh capture
+    std::atomic<uint32_t> syncAcknowledged { 0 };      // Set by reference when it processes sync
+    std::atomic<int64_t> refRawStartSample { 0 };      // Playhead sample when ref started raw accumulation
 };
 
 struct InstanceSlot
@@ -50,11 +52,20 @@ struct ReferenceSTFTBuffer
     float frames[kMaxRefFrames][kNumBins * 2] {};
 };
 
+static constexpr int kMaxRawSamples = 720000;  // 15s @ 48kHz
+
+struct RawSampleBuffer
+{
+    std::atomic<uint32_t> writePos { 0 };
+    float samples[kMaxRawSamples] {};  // mono ring buffer
+};
+
 struct SharedMemoryLayout
 {
     SharedHeader header;
     InstanceSlot slots[kMaxInstances];
     ReferenceSTFTBuffer refBuffer;
+    RawSampleBuffer rawSampleBuffer;
 };
 
 class SharedState
@@ -83,9 +94,17 @@ public:
     std::vector<std::vector<std::complex<float>>> readReferenceFrames() const;
     void clearReferenceBuffer();
 
+    // Raw sample sharing (for time-domain delay detection)
+    void writeRawSamples (const float* data, int numSamples);
+    std::vector<float> readRawSamples (int maxSamples) const;
+    void clearRawSampleBuffer();
+
     // Sync mechanism - target signals reference to start fresh capture
     void requestSync();
     uint32_t getSyncCounter() const;
+    void acknowledgeSyncRequest (int64_t refStartSample);
+    bool isSyncAcknowledged (uint32_t syncValue) const;
+    int64_t getRefRawStartSample() const;
 
     // Instance data
     void updateInstanceData (int slot, float delaySamples, float delayMs,

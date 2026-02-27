@@ -198,13 +198,13 @@ struct TriggerAlign : Action
 struct SetCorrectionMode : Action
 {
     int trackIndex;
-    int mode;  // 0=T+Phi, 1=Phi, 2=T
+    int mode;  // 0=T, 1=Φ (T+Phase)
     SetCorrectionMode (int idx, int m) : trackIndex (idx), mode (m) {}
 
     void execute (FakeDAW& daw, Logger& log) override;
     std::string describe() const override
     {
-        static const char* modeNames[] = { "T+Phi", "Phi", "T" };
+        static const char* modeNames[] = { "T", "Phi" };
         return "SetCorrectionMode(track=" + std::to_string (trackIndex) + ", mode=" + modeNames[mode] + ")";
     }
 };
@@ -632,7 +632,7 @@ void TriggerAlign::execute (FakeDAW& daw, Logger& log)
 
 void SetCorrectionMode::execute (FakeDAW& daw, Logger& log)
 {
-    static const char* modeNames[] = { "T+Phi", "Phi", "T" };
+    static const char* modeNames[] = { "T", "Phi" };
     auto& track = daw.getTrack (trackIndex);
     log.gui ("Track " + std::to_string (trackIndex) + " '" + track.name
            + "': setCorrectionMode(" + modeNames[mode] + ")");

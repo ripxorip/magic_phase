@@ -1,6 +1,7 @@
 #if defined(_WIN32)
 
 #include "PlatformSharedMemory.h"
+#include <cstdio>
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>

@@ -36,12 +36,11 @@ private:
     // Bottom bar
     juce::TextButton refButton { "REF" };
     juce::TextButton alignButton { "MAGIC ALIGN" };
-    juce::TextButton modeTPhi { juce::String::fromUTF8 ("T+\xce\xa6") };
-    juce::TextButton modePhi { juce::String::fromUTF8 ("\xce\xa6") };
     juce::TextButton modeT { "T" };
+    juce::TextButton modePhi { juce::String::fromUTF8 ("\xce\xa6") };
     juce::TextButton abButton { "A/B" };
 
-    int activeMode = 0; // 0=T+Phi, 1=Phi, 2=T
+    int activeMode = 1; // 0=T, 1=Φ (default)
     uint32_t lastVersion = 0;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
