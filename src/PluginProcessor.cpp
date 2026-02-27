@@ -253,6 +253,7 @@ void MagicPhaseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     {
         sharedState.updateInstanceData (mySlot,
             resultDelaySamples.load(),
+            resultDelaySubSample.load(),
             resultDelayMs.load(),
             resultCorrelation.load(),
             resultCoherence.load(),
@@ -375,6 +376,7 @@ void MagicPhaseProcessor::runAnalysisInBackground()
     rawDelayAnalyzer.detectDelayTimeDomain (refRaw, tarRaw);
 
     float rawDelay = rawDelayAnalyzer.getDelaySamples();
+    float rawDelaySubSample = rawDelayAnalyzer.getDelaySubSample();
     float rawCorr = rawDelayAnalyzer.getCorrelation();
     bool rawPolarityInv = rawDelayAnalyzer.getPolarityInverted();
 
@@ -385,7 +387,8 @@ void MagicPhaseProcessor::runAnalysisInBackground()
     // True delay = raw delay minus the sync offset between when the two plugins
     // started accumulating. This is the actual audio delay we need to correct.
     float trueDelay = rawDelay - static_cast<float> (syncOffset);
-    float trueDelayMs = (trueDelay / static_cast<float> (currentSampleRate)) * 1000.0f;
+    float trueDelaySubSample = rawDelaySubSample - static_cast<float> (syncOffset);
+    float trueDelayMs = (trueDelaySubSample / static_cast<float> (currentSampleRate)) * 1000.0f;
 
     if (shouldStopThread.load())
         return;
@@ -455,6 +458,7 @@ void MagicPhaseProcessor::runAnalysisInBackground()
 
     // Store display values for GUI (atomic, safe to read from any thread)
     resultDelaySamples.store (trueDelay);
+    resultDelaySubSample.store (trueDelaySubSample);
     resultDelayMs.store (trueDelayMs);
     resultCorrelation.store (rawCorr);
     resultCoherence.store (coherence);
@@ -517,6 +521,7 @@ void MagicPhaseProcessor::runAnalysisInBackground()
     {
         std::lock_guard<std::mutex> lock (analysisMutex);
         pendingDelaySamples = trueDelay;
+        pendingDelaySubSample = trueDelaySubSample;
         pendingPolarityInvert = rawPolarityInv;
 
         size_t copySize = std::min (phaseCorr.size(), pendingPhaseCorrection.size());
@@ -529,7 +534,7 @@ void MagicPhaseProcessor::runAnalysisInBackground()
     if (mySlot >= 0)
     {
         sharedState.updateInstanceData (mySlot,
-            trueDelay, trueDelayMs, rawCorr, coherence, phaseDeg,
+            trueDelay, trueDelaySubSample, trueDelayMs, rawCorr, coherence, phaseDeg,
             rawPolarityInv, true, true, spectralAnalyzer.getSpectralBands());
         sharedState.setInstanceAligned (mySlot);
     }
@@ -542,7 +547,9 @@ void MagicPhaseProcessor::applyPendingResults()
 {
     std::lock_guard<std::mutex> lock (analysisMutex);
 
-    phaseCorrector.setDelaySamples (pendingDelaySamples);
+    // Use sub-sample delay when enabled, integer otherwise
+    float delayToApply = subSampleOn.load() ? pendingDelaySubSample : pendingDelaySamples;
+    phaseCorrector.setDelaySamples (delayToApply);
     phaseCorrector.setPolarityInvert (pendingPolarityInvert);
 
     std::vector<float> phaseCorr (pendingPhaseCorrection.begin(), pendingPhaseCorrection.end());

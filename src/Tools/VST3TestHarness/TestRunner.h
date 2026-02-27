@@ -38,6 +38,7 @@ struct TrackResult
     bool isAligned = false;
     juce::String alignmentState;
     float delaySamples = 0.0f;
+    float delaySubSample = 0.0f;
     float delayMs = 0.0f;
     float correlation = 0.0f;
     float coherence = 0.0f;

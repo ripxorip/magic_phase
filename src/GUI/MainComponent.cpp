@@ -47,6 +47,17 @@ MainComponent::MainComponent (MagicPhaseProcessor& p)
     setupModeBtn (modeT, 0);
     setupModeBtn (modePhi, 1);
 
+    // Sub-sample toggle
+    subButton.setClickingTogglesState (true);
+    subButton.setColour (juce::TextButton::buttonColourId, MagicColors::surface);
+    subButton.setColour (juce::TextButton::buttonOnColourId, MagicColors::gold);
+    subButton.setColour (juce::TextButton::textColourOffId, MagicColors::text2);
+    subButton.setColour (juce::TextButton::textColourOnId, MagicColors::bg);
+    subButton.onClick = [this] {
+        processor.setSubSampleOn (subButton.getToggleState());
+    };
+    addAndMakeVisible (subButton);
+
     // A/B button
     abButton.setClickingTogglesState (true);
     abButton.onClick = [this] {
@@ -135,14 +146,21 @@ void MainComponent::resized()
     bottomInner.removeFromLeft (12);  // spacing
     alignButton.setBounds (bottomInner.removeFromLeft (160).reduced (0, 0));
 
-    auto rightGroup = bottomInner.removeFromRight (160);
-    int btnW = 42;
+    auto rightGroup = bottomInner.removeFromRight (200);
+    int btnW = 38;
     int btnH = 34;
+    int gap = 6;
     int y = rightGroup.getCentreY() - btnH / 2;
 
-    abButton.setBounds (rightGroup.getRight() - btnW, y, btnW, btnH);
-    modePhi.setBounds (rightGroup.getRight() - btnW - 48, y, btnW, btnH);
-    modeT.setBounds (rightGroup.getRight() - btnW - 96, y, btnW, btnH);
+    // Layout from right: A/B, Sub, Φ, T
+    int x = rightGroup.getRight();
+    abButton.setBounds (x - btnW, y, btnW, btnH);
+    x -= btnW + gap;
+    subButton.setBounds (x - btnW, y, btnW, btnH);
+    x -= btnW + gap;
+    modePhi.setBounds (x - btnW, y, btnW, btnH);
+    x -= btnW + gap;
+    modeT.setBounds (x - btnW, y, btnW, btnH);
 
     // Track viewport
     auto trackArea = bounds.reduced (0, 4);

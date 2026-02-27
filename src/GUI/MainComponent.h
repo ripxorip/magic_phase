@@ -38,6 +38,7 @@ private:
     juce::TextButton alignButton { "MAGIC ALIGN" };
     juce::TextButton modeT { "T" };
     juce::TextButton modePhi { juce::String::fromUTF8 ("\xce\xa6") };
+    juce::TextButton subButton { "Sub" };  // Sub-sample precision toggle
     juce::TextButton abButton { "A/B" };
 
     int activeMode = 1; // 0=T, 1=Φ (default)

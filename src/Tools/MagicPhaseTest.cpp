@@ -252,11 +252,12 @@ int main (int argc, char* argv[])
     delayAnalyzer.detectDelayTimeDomain (refAnalyze, tarAnalyze);
 
     float delaySamples = delayAnalyzer.getDelaySamples();
+    float delaySubSample = delayAnalyzer.getDelaySubSample();
     float delayMs = delayAnalyzer.getDelayMs();
     float correlation = delayAnalyzer.getCorrelation();
     bool polarityInverted = delayAnalyzer.getPolarityInverted();
 
-    std::cout << "  Delay: " << delaySamples << " samples (" << delayMs << " ms)\n";
+    std::cout << "  Delay: " << delaySamples << " samples (sub-sample: " << delaySubSample << ", " << delayMs << " ms)\n";
     std::cout << "  Correlation: " << correlation << "\n";
     std::cout << "  Polarity: " << (polarityInverted ? "INVERTED (180)" : "Normal") << "\n";
 
@@ -471,7 +472,7 @@ int main (int argc, char* argv[])
     std::cout << "  Analyze window:" << analyzeWindowSec << "s (" << analyzeWindowSamples << " samples)\n";
     std::cout << "  Frames analyzed: " << refFrames2.size() << "\n";
     std::cout << "  ────────────────────────────\n";
-    std::cout << "  Delay:      " << delaySamples << " samples (" << delayMs << " ms)\n";
+    std::cout << "  Delay:      " << delaySamples << " samples (sub: " << delaySubSample << ", " << delayMs << " ms)\n";
     std::cout << "  Polarity:   " << (polarityInverted ? "INVERTED" : "Normal") << "\n";
     std::cout << "  Correlation:" << correlation << "\n";
     std::cout << "  Coherence:  " << coherence << "\n";

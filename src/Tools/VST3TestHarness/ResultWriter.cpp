@@ -36,6 +36,7 @@ void ResultWriter::writeResultJson (const TestDefinition& test,
             auto* resultsObj = new juce::DynamicObject();
             resultsObj->setProperty ("alignment_state", track.alignmentState);
             resultsObj->setProperty ("delay_samples", static_cast<double> (track.delaySamples));
+            resultsObj->setProperty ("delay_sub_sample", static_cast<double> (track.delaySubSample));
             resultsObj->setProperty ("delay_ms", static_cast<double> (track.delayMs));
             resultsObj->setProperty ("correlation", static_cast<double> (track.correlation));
             resultsObj->setProperty ("coherence", static_cast<double> (track.coherence));

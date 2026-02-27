@@ -69,6 +69,8 @@ public:
     bool getIsReference() const { return isReference.load(); }
     void setCorrectionMode (int mode); // 0=T, 1=Φ (T+Phase)
     int getCorrectionMode() const { return correctionMode.load(); }
+    void setSubSampleOn (bool on) { subSampleOn.store (on); applyPendingResults(); }
+    bool getSubSampleOn() const { return subSampleOn.load(); }
     void setBypass (bool bypassed);
     bool getBypassed() const { return isBypassed.load(); }
 
@@ -92,6 +94,7 @@ private:
 
     std::atomic<bool> isReference { false };
     std::atomic<int> correctionMode { 1 }; // 0=T, 1=Φ (T+Phase)
+    std::atomic<bool> subSampleOn { false }; // Sub-sample precision correction
     std::atomic<bool> isBypassed { false };
 
     // Alignment state machine
@@ -122,12 +125,14 @@ private:
     std::atomic<bool> shouldStopThread { false };
 
     // Pending results from background analysis (protected by analysisMutex)
-    float pendingDelaySamples = 0.0f;
+    float pendingDelaySamples = 0.0f;       // Integer sample delay
+    float pendingDelaySubSample = 0.0f;     // Sub-sample precision delay
     bool pendingPolarityInvert = false;
     std::array<float, 2049> pendingPhaseCorrection {};
 
     // Post-analysis display values (written by analysis thread, read by GUI + processBlock)
     std::atomic<float> resultDelaySamples { 0.0f };
+    std::atomic<float> resultDelaySubSample { 0.0f };
     std::atomic<float> resultDelayMs { 0.0f };
     std::atomic<float> resultCorrelation { 0.0f };
     std::atomic<float> resultCoherence { 0.0f };

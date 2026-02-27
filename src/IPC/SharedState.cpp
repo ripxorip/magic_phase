@@ -339,7 +339,7 @@ int64_t SharedState::getRefRawStartSample() const
     return layout->header.refRawStartSample.load();
 }
 
-void SharedState::updateInstanceData (int slot, float delaySamples, float delayMs,
+void SharedState::updateInstanceData (int slot, float delaySamples, float delaySubSample, float delayMs,
                                       float correlation, float coherence, float phaseDeg,
                                       bool polarityInv, bool timeOn, bool phaseOn,
                                       const float* bands)
@@ -349,6 +349,7 @@ void SharedState::updateInstanceData (int slot, float delaySamples, float delayM
 
     auto& s = layout->slots[slot];
     s.delaySamples = delaySamples;
+    s.delaySubSample = delaySubSample;
     s.delayMs = delayMs;
     s.correlation = correlation;
     s.overallCoherence = coherence;

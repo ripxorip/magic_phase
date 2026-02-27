@@ -279,6 +279,7 @@ TestResults TestRunner::readResultsFromSharedMemory (SharedState& sharedState,
         tr.isAligned = (slot->active.load() == 2);
         tr.alignmentState = tr.isAligned ? "ALIGNED" : "NOT_ALIGNED";
         tr.delaySamples = slot->delaySamples;
+        tr.delaySubSample = slot->delaySubSample;
         tr.delayMs = slot->delayMs;
         tr.correlation = slot->correlation;
         tr.coherence = slot->overallCoherence;

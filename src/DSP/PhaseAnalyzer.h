@@ -34,6 +34,7 @@ public:
 
     // Results
     float getDelaySamples() const { return delaySamples; }
+    float getDelaySubSample() const { return delaySubSample; }  // Sub-sample precision delay
     float getDelayMs() const { return delayMs; }
     float getCorrelation() const { return correlation; }
     float getOverallCoherence() const { return overallCoherence; }
@@ -57,7 +58,8 @@ private:
     float maxDelayMs = 50.0f;
 
     // Results
-    float delaySamples = 0.0f;
+    float delaySamples = 0.0f;      // Integer sample delay
+    float delaySubSample = 0.0f;    // Sub-sample precision delay (e.g., 49.3)
     float delayMs = 0.0f;
     float correlation = 0.0f;
     float overallCoherence = 0.0f;

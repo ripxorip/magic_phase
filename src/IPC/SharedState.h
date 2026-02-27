@@ -30,7 +30,8 @@ struct InstanceSlot
     std::atomic<uint64_t> heartbeatMs { 0 };      // Timestamp in milliseconds
     char trackName[64] {};
     uint32_t instanceId { 0 };
-    float delaySamples { 0.0f };
+    float delaySamples { 0.0f };      // Integer sample delay
+    float delaySubSample { 0.0f };    // Sub-sample precision delay
     float delayMs { 0.0f };
     float correlation { 0.0f };
     float overallCoherence { 0.0f };
@@ -107,7 +108,7 @@ public:
     int64_t getRefRawStartSample() const;
 
     // Instance data
-    void updateInstanceData (int slot, float delaySamples, float delayMs,
+    void updateInstanceData (int slot, float delaySamples, float delaySubSample, float delayMs,
                              float correlation, float coherence, float phaseDeg,
                              bool polarityInv, bool timeOn, bool phaseOn,
                              const float* bands);

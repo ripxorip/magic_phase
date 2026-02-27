@@ -294,9 +294,9 @@ int runTarget (const std::string& audioPath, const std::string& outputDir)
     std::cout << "[TAR]   Coherence:   " << coherence << "\n";
     std::cout << "[TAR]   Phase avg:   " << phaseDeg << " deg\n";
 
-    // Update shared state
+    // Update shared state (IPCTest uses spectral method, so no sub-sample precision)
     sharedState.updateInstanceData (mySlot,
-        delaySamples, delayMs, correlation, coherence, phaseDeg,
+        delaySamples, delaySamples, delayMs, correlation, coherence, phaseDeg,
         polarityInverted, true, true, analyzer.getSpectralBands());
 
     sharedState.setInstanceAligned (mySlot);

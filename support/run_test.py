@@ -88,9 +88,10 @@ def run(test_file: Path):
         print(f"  {'Metric':<22} {'Actual':>10} {'Expected':>12}  {'':>6}")
         print("-" * W)
 
+        sub = r.get('delay_sub_sample', r['delay_samples'])  # Fallback for older results
         rows = [
             ("Alignment",      r["alignment_state"],          expected.get("alignment_state", ""),       None),
-            ("Delay (samples)", f"{r['delay_samples']:.1f}",  fmt_expected(expected.get("delay_samples")), check(r["delay_samples"], expected.get("delay_samples"))),
+            ("Delay (samples)", f"{r['delay_samples']:.1f} ({sub:.2f})",  fmt_expected(expected.get("delay_samples")), check(r["delay_samples"], expected.get("delay_samples"))),
             ("Delay (ms)",      f"{r['delay_ms']:.2f}",       fmt_expected(expected.get("delay_ms")),      check(r["delay_ms"], expected.get("delay_ms"))),
             ("Correlation",     f"{r['correlation']:.3f}",     fmt_min(expected.get("correlation")),        check_min(r["correlation"], expected.get("correlation"))),
             ("Coherence",       f"{r['coherence']:.3f}",       fmt_min(expected.get("coherence")),          check_min(r["coherence"], expected.get("coherence"))),

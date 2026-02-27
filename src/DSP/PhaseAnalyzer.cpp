@@ -21,6 +21,7 @@ void PhaseAnalyzer::prepare (double sr)
     coherencePerBin.assign (kNumBins, 0.0f);
     spectralBands.fill (0.0f);
     delaySamples = 0.0f;
+    delaySubSample = 0.0f;
     delayMs = 0.0f;
     correlation = 0.0f;
     overallCoherence = 0.0f;
@@ -46,31 +47,62 @@ void PhaseAnalyzer::detectDelayTimeDomain (const std::vector<float>& refSamples,
     }
     double normFactor = std::sqrt (refEnergy * tarEnergy);
 
-    // Search for best correlation within ±maxDelaySamples
-    double bestCorr = 0.0;
-    int bestLag = 0;
-
-    for (int lag = -maxDelaySamples; lag <= maxDelaySamples; ++lag)
+    // Helper to compute correlation at a given lag
+    auto computeCorrelation = [&] (int lag) -> double
     {
         double sum = 0.0;
-
         for (int i = 0; i < n; ++i)
         {
             int j = i + lag;
             if (j >= 0 && j < n)
                 sum += static_cast<double> (targetSamples[i]) * refSamples[j];
         }
+        return sum;
+    };
 
-        if (std::abs (sum) > std::abs (bestCorr))
+    // Search for best correlation within ±maxDelaySamples
+    double bestCorr = 0.0;
+    int bestLag = 0;
+
+    for (int lag = -maxDelaySamples; lag <= maxDelaySamples; ++lag)
+    {
+        double corr = computeCorrelation (lag);
+        if (std::abs (corr) > std::abs (bestCorr))
         {
-            bestCorr = sum;
+            bestCorr = corr;
             bestLag = lag;
+        }
+    }
+
+    // Parabolic interpolation for sub-sample precision
+    // Only if peak is not at the boundary
+    float fractional = 0.0f;
+    if (bestLag > -maxDelaySamples && bestLag < maxDelaySamples)
+    {
+        double c_minus = computeCorrelation (bestLag - 1);
+        double c_peak  = bestCorr;
+        double c_plus  = computeCorrelation (bestLag + 1);
+
+        // If polarity inverted, work with absolute values for parabolic fit
+        if (bestCorr < 0.0)
+        {
+            c_minus = -c_minus;
+            c_peak  = -c_peak;
+            c_plus  = -c_plus;
+        }
+
+        double denom = c_minus - 2.0 * c_peak + c_plus;
+        if (std::abs (denom) > 1e-10)
+        {
+            fractional = static_cast<float> (0.5 * (c_minus - c_plus) / denom);
+            fractional = std::clamp (fractional, -0.5f, 0.5f);
         }
     }
 
     // Negate lag to match convention: positive delay means target is delayed
     delaySamples = static_cast<float> (-bestLag);
-    delayMs = delaySamples / static_cast<float> (sampleRate) * 1000.0f;
+    delaySubSample = static_cast<float> (-bestLag) - fractional;  // Sub-sample precision
+    delayMs = delaySubSample / static_cast<float> (sampleRate) * 1000.0f;
     polarityInverted = (bestCorr < 0.0);
     correlation = static_cast<float> (std::abs (bestCorr) / (normFactor + 1e-10));
 }
