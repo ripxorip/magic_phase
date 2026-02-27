@@ -27,7 +27,9 @@
       "Bash(cmake:*)",
       "Bash(./build/bin/Release/IPCTest.exe:*)",
       "Bash(./build/bin/Release/FakeDAW.exe:*)",
-      "Bash(./build/bin/Release/MagicPhaseTest.exe:*)"
+      "Bash(./build/bin/Release/MagicPhaseTest.exe:*)",
+      "WebSearch",
+      "WebFetch(domain:forum.juce.com)"
     ]
   }
 }
