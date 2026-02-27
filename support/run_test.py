@@ -18,6 +18,47 @@ from pathlib import Path
 # Import plotting (same directory)
 from plot_test_results import main as generate_plots
 
+import numpy as np
+import soundfile as sf
+
+
+def create_normalized_audio(out_dir: Path):
+    """Create normalized versions of sum.wav and raw_sum.wav for easy listening.
+
+    Normalizes sum.wav to -1dB peak, applies same gain to raw_sum.wav
+    so the relative difference is preserved for fair A/B comparison.
+    """
+    sum_path = out_dir / "sum.wav"
+    raw_sum_path = out_dir / "raw_sum.wav"
+
+    if not sum_path.exists() or not raw_sum_path.exists():
+        return
+
+    # Load both files
+    sum_audio, sr = sf.read(str(sum_path))
+    raw_sum_audio, _ = sf.read(str(raw_sum_path))
+
+    # Calculate gain to normalize sum.wav to -1dB peak
+    sum_peak = np.max(np.abs(sum_audio))
+    target_peak = 10 ** (-1.0 / 20)  # -1 dB
+    gain = target_peak / (sum_peak + 1e-10)
+
+    # Apply same gain to both (keeps relative difference fair)
+    sum_norm = sum_audio * gain
+    raw_sum_norm = raw_sum_audio * gain
+
+    # Clip raw_sum if it would exceed 0dB (unlikely but safe)
+    raw_sum_norm = np.clip(raw_sum_norm, -1.0, 1.0)
+
+    # Write normalized versions
+    sf.write(str(out_dir / "sum_norm.wav"), sum_norm, sr)
+    sf.write(str(out_dir / "raw_sum_norm.wav"), raw_sum_norm, sr)
+
+    gain_db = 20 * np.log10(gain)
+    print(f"  Created normalized audio (gain: {gain_db:+.1f} dB):")
+    print(f"    - sum_norm.wav (aligned, -1dB peak)")
+    print(f"    - raw_sum_norm.wav (raw, same gain for fair A/B)")
+
 # Paths
 ROOT = Path(__file__).parent.parent
 if platform.system() == "Windows":
@@ -143,6 +184,10 @@ def run(test_file: Path, generate_plot: bool = True):
         finally:
             sys.argv = old_argv
         print(f"\n  View: {out_dir / 'plot_overview.png'}")
+
+    # Create normalized audio for easy listening
+    print("\nCreating normalized audio for A/B listening...")
+    create_normalized_audio(out_dir)
 
     return 0 if all_pass else 1
 
