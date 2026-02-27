@@ -1,0 +1,23 @@
+{
+  "name": "tbm_overheads_lr",
+  "description": "Overhead Left vs Right - should be highly coherent, minimal delay",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
+  "sample_rate": 48000,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/tbm_drums/Overhead Left.wav",
+      "role": "reference"
+    },
+    {
+      "file": "input/tbm_drums/Overhead Right.wav",
+      "role": "target",
+      "mode": "phi"
+    }
+  ],
+  "expected": {
+    "correlation": { "min": 0.25 },
+    "coherence": { "min": 0.5 },
+    "alignment_state": "ALIGNED"
+  }
+}

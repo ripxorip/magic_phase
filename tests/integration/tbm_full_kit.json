@@ -1,0 +1,41 @@
+{
+  "name": "tbm_full_kit",
+  "description": "Full drum kit - all mics aligned to Kick as reference",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
+  "sample_rate": 48000,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/tbm_drums/Kick.wav",
+      "role": "reference"
+    },
+    {
+      "file": "input/tbm_drums/Snare Top.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/tbm_drums/Snare Bottom.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/tbm_drums/Overhead Left.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/tbm_drums/Overhead Right.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/tbm_drums/Room.wav",
+      "role": "target",
+      "mode": "phi"
+    }
+  ],
+  "expected": {
+    "alignment_state": "ALIGNED"
+  }
+}

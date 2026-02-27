@@ -1,0 +1,23 @@
+{
+  "name": "tbm_kick_room",
+  "description": "Kick close mic vs Room - should hear tighter low-end after alignment",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
+  "sample_rate": 48000,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/tbm_drums/Kick.wav",
+      "role": "reference"
+    },
+    {
+      "file": "input/tbm_drums/Room.wav",
+      "role": "target",
+      "mode": "phi"
+    }
+  ],
+  "expected": {
+    "correlation": { "min": 0.15 },
+    "coherence": { "min": 0.2 },
+    "alignment_state": "ALIGNED"
+  }
+}

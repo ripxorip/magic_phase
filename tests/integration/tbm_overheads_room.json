@@ -1,0 +1,29 @@
+{
+  "name": "tbm_overheads_room",
+  "description": "TBM drums - Overheads L/R and Room",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
+  "sample_rate": 48000,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/tbm_drums/Overhead Left.wav",
+      "role": "reference"
+    },
+    {
+      "file": "input/tbm_drums/Overhead Right.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/tbm_drums/Room.wav",
+      "role": "target",
+      "mode": "phi"
+    }
+  ],
+  "expected": {
+    "polarity": "normal",
+    "correlation": { "min": 0.1 },
+    "coherence": { "min": 0.1 },
+    "alignment_state": "ALIGNED"
+  }
+}

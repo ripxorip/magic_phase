@@ -1,0 +1,24 @@
+{
+  "name": "7sg_snare_top_bottom",
+  "description": "7sg drums - Snare top vs snare bottom",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
+  "sample_rate": 48000,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/7sg_drums/snare top.wav",
+      "role": "reference"
+    },
+    {
+      "file": "input/7sg_drums/snare bot.wav",
+      "role": "target",
+      "mode": "phi"
+    }
+  ],
+  "expected": {
+    "polarity": "normal",
+    "correlation": { "min": 0.15 },
+    "coherence": { "min": 0.25 },
+    "alignment_state": "ALIGNED"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "tbm_snare_overheads",
+  "description": "Snare top vs Overheads - bleed alignment with significant delay",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
+  "sample_rate": 48000,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/tbm_drums/Snare Top.wav",
+      "role": "reference"
+    },
+    {
+      "file": "input/tbm_drums/Overhead Left.wav",
+      "role": "target",
+      "mode": "phi"
+    }
+  ],
+  "expected": {
+    "correlation": { "min": 0.1 },
+    "coherence": { "min": 0.15 },
+    "alignment_state": "ALIGNED"
+  }
+}

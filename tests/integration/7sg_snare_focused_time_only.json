@@ -1,0 +1,31 @@
+{
+  "name": "7sg_snare_focused_time_only",
+  "description": "7sg drums - Snare focused with TIME ONLY (no spectral)",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
+  "sample_rate": 48000,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/7sg_drums/snare top.wav",
+      "role": "reference"
+    },
+    {
+      "file": "input/7sg_drums/snare bot.wav",
+      "role": "target",
+      "mode": "t"
+    },
+    {
+      "file": "input/7sg_drums/overhead left.wav",
+      "role": "target",
+      "mode": "t"
+    },
+    {
+      "file": "input/7sg_drums/overhead right.wav",
+      "role": "target",
+      "mode": "t"
+    }
+  ],
+  "expected": {
+    "alignment_state": "ALIGNED"
+  }
+}

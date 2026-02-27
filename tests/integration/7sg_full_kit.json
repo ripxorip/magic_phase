@@ -1,0 +1,51 @@
+{
+  "name": "7sg_full_kit",
+  "description": "7sg drums - Full kit aligned to kick",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
+  "sample_rate": 48000,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/7sg_drums/kick.wav",
+      "role": "reference"
+    },
+    {
+      "file": "input/7sg_drums/snare top.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/7sg_drums/snare bot.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/7sg_drums/overhead left.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/7sg_drums/overhead right.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/7sg_drums/tom l.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/7sg_drums/tom c.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/7sg_drums/tom r.wav",
+      "role": "target",
+      "mode": "phi"
+    }
+  ],
+  "expected": {
+    "alignment_state": "ALIGNED"
+  }
+}

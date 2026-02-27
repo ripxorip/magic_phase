@@ -34,7 +34,10 @@
       "Bash(.venv/Scripts/python:*)",
       "Bash(cat:*)",
       "Bash(./build/bin/MagicPhaseTest:*)",
-      "Bash(python3 -c:*)"
+      "Bash(python3 -c:*)",
+      "Bash(./build/bin/VST3TestHarness:*)",
+      "Bash(python3:*)",
+      "WebFetch(domain:www.production-expert.com)"
     ]
   }
 }
