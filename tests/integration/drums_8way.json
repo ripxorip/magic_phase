@@ -1,0 +1,61 @@
+{
+  "name": "drums_8way",
+  "description": "8-track drum test: test_001 as reference, 7 targets",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
+  "sample_rate": 48000,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/drums_cut/test_001.wav",
+      "role": "reference",
+      "gain": 1.0
+    },
+    {
+      "file": "input/drums_cut/test_002.wav",
+      "role": "target",
+      "mode": "phi",
+      "gain": 1.0
+    },
+    {
+      "file": "input/drums_cut/test_003.wav",
+      "role": "target",
+      "mode": "phi",
+      "gain": 1.0
+    },
+    {
+      "file": "input/drums_cut/test_004.wav",
+      "role": "target",
+      "mode": "phi",
+      "gain": 1.0
+    },
+    {
+      "file": "input/drums_cut/test_005.wav",
+      "role": "target",
+      "mode": "phi",
+      "gain": 1.0
+    },
+    {
+      "file": "input/drums_cut/test_006.wav",
+      "role": "target",
+      "mode": "phi",
+      "gain": 1.0
+    },
+    {
+      "file": "input/drums_cut/test_007.wav",
+      "role": "target",
+      "mode": "phi",
+      "gain": 1.0
+    },
+    {
+      "file": "input/drums_cut/test_008.wav",
+      "role": "target",
+      "mode": "phi",
+      "gain": 1.0
+    }
+  ],
+  "expected": {
+    "alignment_state": "ALIGNED",
+    "correlation": { "min": 0.2 },
+    "coherence": { "min": 0.5 }
+  }
+}
