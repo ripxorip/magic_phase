@@ -626,10 +626,11 @@ TestResults TestRunner::run (const TestDefinition& test)
     // Write summed output (all tracks mixed)
     if (replayBuffers.size() >= 2)
     {
+        float sumGain = 1.0f / static_cast<float> (replayBuffers.size());
         juce::AudioBuffer<float> sumBuffer (1, writeLen);
         sumBuffer.clear();
         for (auto& buf : replayBuffers)
-            sumBuffer.addFrom (0, 0, buf, 0, 0, writeLen);
+            sumBuffer.addFrom (0, 0, buf, 0, 0, writeLen, sumGain);
 
         juce::File sumFile = outputDir.getChildFile ("sum.wav");
         sumFile.deleteFile();  // Ensure clean overwrite on Windows
@@ -652,10 +653,11 @@ TestResults TestRunner::run (const TestDefinition& test)
         for (auto& buf : inputBuffers)
             rawLen = std::max (rawLen, buf.getNumSamples());
 
+        float rawGain = 1.0f / static_cast<float> (inputBuffers.size());
         juce::AudioBuffer<float> rawSum (1, rawLen);
         rawSum.clear();
         for (auto& buf : inputBuffers)
-            rawSum.addFrom (0, 0, buf, 0, 0, std::min (rawLen, buf.getNumSamples()));
+            rawSum.addFrom (0, 0, buf, 0, 0, std::min (rawLen, buf.getNumSamples()), rawGain);
 
         juce::File rawSumFile = outputDir.getChildFile ("raw_sum.wav");
         rawSumFile.deleteFile();  // Ensure clean overwrite on Windows
@@ -675,13 +677,15 @@ TestResults TestRunner::run (const TestDefinition& test)
     // Print diagnostic: compare corrected vs uncorrected RMS
     if (replayBuffers.size() >= 2)
     {
+        float diagGain = 1.0f / static_cast<float> (replayBuffers.size());
+
         // Compute RMS of corrected sum
         float corrRms = 0.0f;
         {
             juce::AudioBuffer<float> corrSum (1, writeLen);
             corrSum.clear();
             for (auto& buf : replayBuffers)
-                corrSum.addFrom (0, 0, buf, 0, 0, writeLen);
+                corrSum.addFrom (0, 0, buf, 0, 0, writeLen, diagGain);
 
             auto* data = corrSum.getReadPointer (0);
             double sum = 0.0;
@@ -696,7 +700,7 @@ TestResults TestRunner::run (const TestDefinition& test)
             juce::AudioBuffer<float> rawSum (1, writeLen);
             rawSum.clear();
             for (auto& buf : inputBuffers)
-                rawSum.addFrom (0, 0, buf, 0, 0, std::min (writeLen, buf.getNumSamples()));
+                rawSum.addFrom (0, 0, buf, 0, 0, std::min (writeLen, buf.getNumSamples()), diagGain);
 
             auto* data = rawSum.getReadPointer (0);
             double sum = 0.0;
