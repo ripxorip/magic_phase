@@ -39,6 +39,26 @@ juce::AudioProcessorValueTreeState::ParameterLayout MagicPhaseProcessor::createP
         juce::NormalisableRange<float> (0.0f, 180.0f, 1.0f),
         120.0f));
 
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "triggerAlign", 1 },
+        "Trigger Align",
+        false));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "isReference", 1 },
+        "Is Reference",
+        false));
+
+    params.push_back (std::make_unique<juce::AudioParameterInt> (
+        juce::ParameterID { "correctionMode", 1 },
+        "Correction Mode",
+        0, 1, 1));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "bypass", 1 },
+        "Bypass",
+        false));
+
     return { params.begin(), params.end() };
 }
 
@@ -84,6 +104,25 @@ void MagicPhaseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         return;
 
     sharedState.updateHeartbeat (mySlot);
+
+    // Sync APVTS parameters → internal state
+    if (apvts.getRawParameterValue ("triggerAlign")->load() > 0.5f)
+    {
+        apvts.getParameter ("triggerAlign")->setValueNotifyingHost (0.0f);
+        startAlign();
+    }
+
+    bool paramIsRef = apvts.getRawParameterValue ("isReference")->load() > 0.5f;
+    if (paramIsRef != isReference.load())
+        setIsReference (paramIsRef);
+
+    int paramMode = static_cast<int> (apvts.getRawParameterValue ("correctionMode")->load());
+    if (paramMode != correctionMode.load())
+        setCorrectionMode (paramMode);
+
+    bool paramBypass = apvts.getRawParameterValue ("bypass")->load() > 0.5f;
+    if (paramBypass != isBypassed.load())
+        setBypass (paramBypass);
 
     auto* channelData = buffer.getWritePointer (0);
     const int numSamples = buffer.getNumSamples();

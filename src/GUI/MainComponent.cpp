@@ -27,7 +27,8 @@ MainComponent::MainComponent (MagicPhaseProcessor& p)
     refButton.setColour (juce::TextButton::textColourOffId, MagicColors::text2);
     refButton.setColour (juce::TextButton::textColourOnId, MagicColors::bg);
     refButton.onClick = [this] {
-        processor.setIsReference (refButton.getToggleState());
+        processor.getAPVTS().getParameter ("isReference")->setValueNotifyingHost (
+            refButton.getToggleState() ? 1.0f : 0.0f);
     };
     addAndMakeVisible (refButton);
 
@@ -48,7 +49,10 @@ MainComponent::MainComponent (MagicPhaseProcessor& p)
 
     // A/B button
     abButton.setClickingTogglesState (true);
-    abButton.onClick = [this] { processor.setBypass (abButton.getToggleState()); };
+    abButton.onClick = [this] {
+        processor.getAPVTS().getParameter ("bypass")->setValueNotifyingHost (
+            abButton.getToggleState() ? 1.0f : 0.0f);
+    };
     addAndMakeVisible (abButton);
 
     // Initial mode state - default to Φ
@@ -312,7 +316,7 @@ void MainComponent::onAlignClicked()
     if (state == AlignmentState::IDLE || state == AlignmentState::ALIGNED || state == AlignmentState::NO_REF)
     {
         // Start alignment process - wait for audio
-        processor.startAlign();
+        processor.getAPVTS().getParameter ("triggerAlign")->setValueNotifyingHost (1.0f);
     }
     else if (state == AlignmentState::WAITING)
     {
@@ -325,7 +329,8 @@ void MainComponent::onAlignClicked()
 void MainComponent::onModeClicked (int mode)
 {
     activeMode = mode;
-    processor.setCorrectionMode (mode);
+    processor.getAPVTS().getParameter ("correctionMode")->setValueNotifyingHost (
+        processor.getAPVTS().getParameter ("correctionMode")->convertTo0to1 (static_cast<float> (mode)));
 
     auto setActive = [this] (juce::TextButton& btn, bool active) {
         btn.setColour (juce::TextButton::buttonColourId,

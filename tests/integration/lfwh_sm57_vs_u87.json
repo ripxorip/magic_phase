@@ -1,0 +1,26 @@
+{
+  "name": "lfwh_sm57_front_vs_u87",
+  "description": "Close mic SM57 vs room mic U87, known ~1ms delay",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3/Contents/x86_64-win/Magic Phase.vst3",
+  "sample_rate": 48000,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/lfwh_sm57_front.wav",
+      "role": "reference"
+    },
+    {
+      "file": "input/lfwh_u87.wav",
+      "role": "target",
+      "mode": "phi"
+    }
+  ],
+  "expected": {
+    "delay_samples": { "value": 49, "tolerance": 2 },
+    "delay_ms": { "value": 1.02, "tolerance": 0.1 },
+    "correlation": { "min": 0.8 },
+    "coherence": { "min": 0.7 },
+    "polarity": "normal",
+    "alignment_state": "ALIGNED"
+  }
+}

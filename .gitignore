@@ -25,3 +25,6 @@ build/
 
 output_cpp/
 output_python/
+
+# Test results
+results/

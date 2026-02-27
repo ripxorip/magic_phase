@@ -29,7 +29,9 @@
       "Bash(./build/bin/Release/FakeDAW.exe:*)",
       "Bash(./build/bin/Release/MagicPhaseTest.exe:*)",
       "WebSearch",
-      "WebFetch(domain:forum.juce.com)"
+      "WebFetch(domain:forum.juce.com)",
+      "Bash(./build/bin/Release/VST3TestHarness.exe:*)",
+      "Bash(.venv/Scripts/python:*)"
     ]
   }
 }

@@ -347,6 +347,75 @@ if(MP_BUILD_CLI_TEST)
     message(STATUS "  FakeDAW Test Harness: ON")
 endif()
 
+# VST3 Integration Test Harness
+if(MP_BUILD_CLI_TEST)
+    juce_add_console_app(VST3TestHarness
+        PRODUCT_NAME "VST3TestHarness"
+        COMPANY_NAME "MiGiC Music"
+    )
+
+    set(VST3HARNESS_SOURCES
+        src/Tools/VST3TestHarness/Main.cpp
+        src/Tools/VST3TestHarness/TestRunner.cpp
+        src/Tools/VST3TestHarness/ResultWriter.cpp
+        src/IPC/SharedState.cpp
+    )
+
+    # Platform-specific shared memory
+    if(WIN32)
+        list(APPEND VST3HARNESS_SOURCES src/IPC/PlatformSharedMemory_win32.cpp)
+    else()
+        list(APPEND VST3HARNESS_SOURCES src/IPC/PlatformSharedMemory_posix.cpp)
+    endif()
+
+    target_sources(VST3TestHarness PRIVATE ${VST3HARNESS_SOURCES})
+
+    target_compile_definitions(VST3TestHarness PRIVATE
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_STRICT_REFCOUNTEDPTR=1
+        JUCE_DISABLE_JUCE_VERSION_PRINTING=1
+        JUCE_PLUGINHOST_VST3=1
+    )
+
+    target_include_directories(VST3TestHarness PRIVATE
+        src
+        src/IPC
+        src/Tools/VST3TestHarness
+    )
+
+    target_link_libraries(VST3TestHarness PRIVATE
+        juce::juce_core
+        juce::juce_audio_basics
+        juce::juce_audio_formats
+        juce::juce_audio_processors
+        juce::juce_audio_utils
+        juce::juce_data_structures
+        juce::juce_events
+        juce::juce_graphics
+        juce::juce_gui_basics
+        juce::juce_gui_extra
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags
+    )
+
+    if(MP_LINUX)
+        target_compile_definitions(VST3TestHarness PRIVATE MP_LINUX=1)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(VST3TestHarness PRIVATE -fno-lto)
+            target_link_options(VST3TestHarness PRIVATE -fno-lto)
+        endif()
+        find_package(Threads REQUIRED)
+        target_link_libraries(VST3TestHarness PRIVATE Threads::Threads dl rt)
+    endif()
+
+    set_target_properties(VST3TestHarness PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+
+    message(STATUS "  VST3 Test Harness: ON")
+endif()
+
 message(STATUS "Magic Phase Configuration:")
 message(STATUS "  Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "  Plugin Formats: ${MP_FORMATS}")
