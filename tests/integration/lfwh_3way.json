@@ -1,0 +1,28 @@
+{
+  "name": "lfwh_3way",
+  "description": "3-way test: U87 room mic as reference, SM57 front+back as targets",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
+  "sample_rate": 48000,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/lfwh_u87.wav",
+      "role": "reference"
+    },
+    {
+      "file": "input/lfwh_sm57_front.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/lfwh_sm57_back.wav",
+      "role": "target",
+      "mode": "phi"
+    }
+  ],
+  "expected": {
+    "alignment_state": "ALIGNED",
+    "correlation": { "min": 0.3 },
+    "coherence": { "min": 0.6 }
+  }
+}
