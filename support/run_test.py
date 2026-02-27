@@ -9,7 +9,11 @@ from pathlib import Path
 
 # Paths
 ROOT = Path(__file__).parent.parent
-HARNESS = ROOT / "build" / "bin" / "Release" / "VST3TestHarness.exe"
+import platform
+if platform.system() == "Windows":
+    HARNESS = ROOT / "build" / "bin" / "Release" / "VST3TestHarness.exe"
+else:
+    HARNESS = ROOT / "build" / "bin" / "VST3TestHarness"
 TEST_DEF = ROOT / "tests" / "integration" / "lfwh_sm57_vs_u87.json"
 OUT_DIR = ROOT / "results" / "latest"
 RESULT = OUT_DIR / "result.json"

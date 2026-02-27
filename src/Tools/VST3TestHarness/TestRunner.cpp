@@ -604,6 +604,7 @@ TestResults TestRunner::run (const TestDefinition& test)
     {
         juce::String trackName = juce::File (test.tracks[i].file).getFileNameWithoutExtension();
         juce::File outFile = outputDir.getChildFile (trackName + "_out.wav");
+        outFile.deleteFile();  // Ensure clean overwrite on Windows
 
         juce::WavAudioFormat wavFormat;
         std::unique_ptr<juce::AudioFormatWriter> writer (
@@ -631,6 +632,7 @@ TestResults TestRunner::run (const TestDefinition& test)
             sumBuffer.addFrom (0, 0, buf, 0, 0, writeLen);
 
         juce::File sumFile = outputDir.getChildFile ("sum.wav");
+        sumFile.deleteFile();  // Ensure clean overwrite on Windows
         juce::WavAudioFormat wavFmt;
         std::unique_ptr<juce::AudioFormatWriter> sumWriter (
             wavFmt.createWriterFor (
@@ -656,6 +658,7 @@ TestResults TestRunner::run (const TestDefinition& test)
             rawSum.addFrom (0, 0, buf, 0, 0, std::min (rawLen, buf.getNumSamples()));
 
         juce::File rawSumFile = outputDir.getChildFile ("raw_sum.wav");
+        rawSumFile.deleteFile();  // Ensure clean overwrite on Windows
         juce::WavAudioFormat rawFmt;
         std::unique_ptr<juce::AudioFormatWriter> rawWriter (
             rawFmt.createWriterFor (

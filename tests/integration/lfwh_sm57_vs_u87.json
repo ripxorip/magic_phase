@@ -1,7 +1,7 @@
 {
   "name": "lfwh_sm57_front_vs_u87",
   "description": "Close mic SM57 vs room mic U87, known ~1ms delay",
-  "plugin_path": "build/lib/VST3/Magic Phase.vst3/Contents/x86_64-win/Magic Phase.vst3",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
   "sample_rate": 48000,
   "buffer_size": 64,
   "tracks": [

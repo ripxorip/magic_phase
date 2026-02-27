@@ -56,9 +56,43 @@ bool PlatformSharedMemory::open (const char* name, size_t size, bool& createdNew
 
     if (ptr_ == nullptr)
     {
+        // Mapping failed - possibly size mismatch with existing segment
+        // Close and try to recreate with correct size
         CloseHandle (fileHandle_);
         fileHandle_ = nullptr;
-        return false;
+
+        if (! createdNew)
+        {
+            // Was existing mapping - try fresh creation
+            fileHandle_ = CreateFileMappingA (
+                INVALID_HANDLE_VALUE,
+                nullptr,
+                PAGE_READWRITE,
+                sizeHigh,
+                sizeLow,
+                fullName
+            );
+
+            if (fileHandle_ != nullptr)
+            {
+                createdNew = (GetLastError() != ERROR_ALREADY_EXISTS);
+                ptr_ = MapViewOfFile (fileHandle_, FILE_MAP_ALL_ACCESS, 0, 0, size);
+                if (ptr_ == nullptr)
+                {
+                    CloseHandle (fileHandle_);
+                    fileHandle_ = nullptr;
+                    return false;
+                }
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return false;
+        }
     }
 
     size_ = size;
