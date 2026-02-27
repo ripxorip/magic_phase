@@ -33,7 +33,8 @@
       "Bash(./build/bin/Release/VST3TestHarness.exe:*)",
       "Bash(.venv/Scripts/python:*)",
       "Bash(cat:*)",
-      "Bash(./build/bin/MagicPhaseTest:*)"
+      "Bash(./build/bin/MagicPhaseTest:*)",
+      "Bash(python3 -c:*)"
     ]
   }
 }

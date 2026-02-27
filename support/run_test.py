@@ -4,6 +4,7 @@
 Usage:
     python run_test.py                          # Run default test
     python run_test.py path/to/test.json        # Run specific test
+    python run_test.py path/to/test.json --no-plot  # Skip plot generation
 """
 
 import argparse
@@ -14,6 +15,9 @@ import os
 import platform
 from pathlib import Path
 
+# Import plotting (same directory)
+from plot_test_results import main as generate_plots
+
 # Paths
 ROOT = Path(__file__).parent.parent
 if platform.system() == "Windows":
@@ -23,7 +27,7 @@ else:
 DEFAULT_TEST = ROOT / "tests" / "integration" / "lfwh_sm57_vs_u87.json"
 
 
-def run(test_file: Path):
+def run(test_file: Path, generate_plot: bool = True):
     if not HARNESS.exists():
         print(f"Harness not found: {HARNESS}")
         print("Build with: cmake --build build --config Release --target VST3TestHarness")
@@ -125,6 +129,21 @@ def run(test_file: Path):
     print("=" * W)
     print(f"  Output: {out_dir}")
     print("=" * W)
+
+    # Generate analysis plots
+    if generate_plot:
+        print("\nGenerating analysis plots...")
+        # Temporarily override sys.argv for the plot script
+        old_argv = sys.argv
+        sys.argv = ['plot_test_results.py', str(out_dir)]
+        try:
+            generate_plots()
+        except SystemExit:
+            pass  # plot script calls exit()
+        finally:
+            sys.argv = old_argv
+        print(f"\n  View: {out_dir / 'plot_overview.png'}")
+
     return 0 if all_pass else 1
 
 
@@ -167,5 +186,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run VST3 integration test")
     parser.add_argument("test_file", nargs="?", type=Path, default=DEFAULT_TEST,
                         help="Path to test definition JSON (default: lfwh_sm57_vs_u87.json)")
+    parser.add_argument("--no-plot", action="store_true",
+                        help="Skip generating analysis plots")
     args = parser.parse_args()
-    sys.exit(run(args.test_file))
+    sys.exit(run(args.test_file, generate_plot=not args.no_plot))
