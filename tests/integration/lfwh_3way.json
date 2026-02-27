@@ -20,7 +20,7 @@
       "file": "input/lfwh_sm57_back.wav",
       "role": "target",
       "mode": "phi",
-      "gain": 0.5
+      "gain": 1.5
     }
   ],
   "expected": {
