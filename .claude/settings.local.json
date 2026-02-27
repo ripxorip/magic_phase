@@ -31,7 +31,8 @@
       "WebSearch",
       "WebFetch(domain:forum.juce.com)",
       "Bash(./build/bin/Release/VST3TestHarness.exe:*)",
-      "Bash(.venv/Scripts/python:*)"
+      "Bash(.venv/Scripts/python:*)",
+      "Bash(cat:*)"
     ]
   }
 }
