@@ -7,17 +7,20 @@
   "tracks": [
     {
       "file": "input/lfwh_u87.wav",
-      "role": "reference"
+      "role": "reference",
+      "gain": 1.0
     },
     {
       "file": "input/lfwh_sm57_front.wav",
       "role": "target",
-      "mode": "phi"
+      "mode": "phi",
+      "gain": 1.0
     },
     {
       "file": "input/lfwh_sm57_back.wav",
       "role": "target",
-      "mode": "phi"
+      "mode": "phi",
+      "gain": 0.5
     }
   ],
   "expected": {

@@ -11,6 +11,7 @@ struct TrackDefinition
     juce::String file;
     juce::String role;       // "reference" or "target"
     juce::String mode;       // "phi" or "t" (target tracks only)
+    float gain = 1.0f;       // Mix level for summing (0.0 to 1.0+)
 };
 
 struct TestDefinition
