@@ -70,7 +70,8 @@ def create_normalized_audio(out_dir: Path):
     print(f"    - sum_norm.wav (aligned, -1dB peak)")
     print(f"    - raw_sum_norm.wav (raw, same gain for fair A/B)")
 
-def run_python_engine(test_file: Path, out_dir: Path, result_file: Path):
+def run_python_engine(test_file: Path, out_dir: Path, result_file: Path,
+                      analyze_window_s: float = 7.5):
     """Run alignment using Python DSP engine (prototyping mode).
 
     Produces the same output structure as the VST3 harness:
@@ -127,9 +128,15 @@ def run_python_engine(test_file: Path, out_dir: Path, result_file: Path):
     ref_audio = ref_audio[:common_len]
     target_audios = [t[:common_len] for t in target_audios]
 
+    # Analysis window (match C++ VST3 harness default)
+    analyze_samples = min(int(analyze_window_s * sr), common_len)
+    ref_analyze = ref_audio[:analyze_samples]
+
     t_load = time.perf_counter()
     print(f"\n  Loaded {1 + len(target_defs)} tracks in {(t_load - t_start)*1000:.0f}ms"
           f" (common length: {common_len/sr:.2f}s, {common_len} samples)")
+    print(f"  Analysis window: {analyze_samples/sr:.1f}s / {common_len/sr:.1f}s"
+          f" ({analyze_samples} samples)")
 
     # Write reference output (pass-through, same as VST3 harness)
     ref_out = out_dir / f"{ref_path.stem}_out.wav"
@@ -157,9 +164,10 @@ def run_python_engine(test_file: Path, out_dir: Path, result_file: Path):
         print(f"  TARGET {idx+1}/{len(target_defs)}: {track_name} (mode={mode})")
         print(f"  {'-'*54}")
 
-        # ── Delay Detection ──
+        # ── Delay Detection (on analysis window) ──
+        tar_analyze = tar[:analyze_samples]
         t0 = time.perf_counter()
-        delay, corr, pol = detect_delay_xcorr(ref_audio, tar, sr)
+        delay, corr, pol = detect_delay_xcorr(ref_analyze, tar_analyze, sr)
         delay_ms = delay / sr * 1000
         t1 = time.perf_counter()
 
@@ -169,10 +177,12 @@ def run_python_engine(test_file: Path, out_dir: Path, result_file: Path):
         print(f"    Polarity:    {pol_str}")
         print(f"    (xcorr: {(t1-t0)*1000:.0f}ms)")
 
-        # ── Time Correction ──
+        # ── Time Correction (full file, analyzed on window) ──
         corrected = correct_delay_subsample(tar, delay, sr)
+        corrected_analyze = correct_delay_subsample(tar_analyze, delay, sr)
         if pol < 0:
             corrected = -corrected
+            corrected_analyze = -corrected_analyze
 
         # ── Spectral Phase Correction ──
         bands_48 = [0.0] * 48
@@ -183,8 +193,9 @@ def run_python_engine(test_file: Path, out_dir: Path, result_file: Path):
         if mode == "phi":
             t2 = time.perf_counter()
 
+            # Analyze on window, apply to full file
             f_bins, phase_corr, coh = analyze_phase_spectral(
-                ref_audio, corrected, sr,
+                ref_analyze, corrected_analyze, sr,
                 coherence_threshold=0.4, max_correction_deg=120
             )
             corrected = apply_phase_spectral(corrected, phase_corr, sr)
@@ -314,7 +325,8 @@ else:
 DEFAULT_TEST = ROOT / "tests" / "integration" / "lfwh_sm57_vs_u87.json"
 
 
-def run(test_file: Path, generate_plot: bool = True, use_python: bool = False):
+def run(test_file: Path, generate_plot: bool = True, use_python: bool = False,
+        analyze_window: float = 7.5):
     if not test_file.exists():
         print(f"Test definition not found: {test_file}")
         return 1
@@ -332,7 +344,7 @@ def run(test_file: Path, generate_plot: bool = True, use_python: bool = False):
     if use_python:
         # ── Python DSP engine ──
         print(f"Running Python DSP engine: {test_name}\n")
-        if not run_python_engine(test_file, out_dir, result_file):
+        if not run_python_engine(test_file, out_dir, result_file, analyze_window):
             return 1
     else:
         # ── C++ VST3 harness ──
@@ -502,5 +514,8 @@ if __name__ == "__main__":
                         help="Skip generating analysis plots")
     parser.add_argument("--py", action="store_true",
                         help="Use Python DSP engine instead of VST3 harness (faster prototyping)")
+    parser.add_argument("--analyze-window", type=float, default=7.5,
+                        help="Analysis window in seconds (default: 7.5, matching C++ harness)")
     args = parser.parse_args()
-    sys.exit(run(args.test_file, generate_plot=not args.no_plot, use_python=args.py))
+    sys.exit(run(args.test_file, generate_plot=not args.no_plot, use_python=args.py,
+                 analyze_window=args.analyze_window))

@@ -52,8 +52,35 @@ actually work on different mic combinations.
 - Nix flake for dev environment
 - Shared memory IPC for multi-instance communication
 
-## Test Tools
-- `MagicPhaseTest` - Offline DSP validation (no IPC)
+## Main Development Tool
+
+`support/run_test.py` is the primary tool for day-to-day development and DSP iteration.
+
+```bash
+# Run through C++ VST3 harness (validates real plugin behavior)
+.venv/Scripts/python.exe support/run_test.py tests/integration/7sg_kick_snare_overhead.json
+
+# Run through Python DSP engine (fast prototyping, more logs)
+.venv/Scripts/python.exe support/run_test.py tests/integration/7sg_kick_snare_overhead.json --py
+
+# Tweak analysis window (default 7.5s matches C++ harness)
+.venv/Scripts/python.exe support/run_test.py tests/integration/7sg_kick_snare_overhead.json --py --analyze-window 3
+```
+
+Both engines produce identical output structure in `results/<test_name>[_py]/`:
+- Per-track `*_out.wav` files, `raw_sum.wav`, `sum.wav` (+ normalized versions)
+- `result.json` with delay/coherence/phase metrics
+- Analysis plots (overview + per-track)
+- Reaper project for A/B listening
+
+The `--py` flag swaps the C++ VST3 harness for the Python DSP engine (`python/align_files.py`).
+This is ~10x faster and gives detailed per-frequency-region logs — use it when iterating on
+DSP algorithms. The core math (STFT, coherence, phase correction) is shared between both engines.
+
+Test definitions live in `tests/integration/*.json`.
+
+## Other Test Tools
+- `MagicPhaseTest` - Offline C++ DSP validation (no IPC)
 - `IPCTest` - Shared memory IPC validation (two processes)
 - `FakeDAW` - Full integration testing (TODO: implement per FAKEDAW_PLAN.md)
 
