@@ -6,11 +6,11 @@
   "buffer_size": 64,
   "tracks": [
     {
-      "file": "input/7sg_drums/Kick.wav",
+      "file": "input/7sg_drums/Snare Top.wav",
       "role": "reference"
     },
     {
-      "file": "input/7sg_drums/Snare Top.wav",
+      "file": "input/7sg_drums/Kick.wav",
       "role": "target",
       "mode": "phi"
     },
