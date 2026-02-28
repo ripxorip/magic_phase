@@ -38,7 +38,8 @@
       "Bash(./build/bin/VST3TestHarness:*)",
       "Bash(python3:*)",
       "WebFetch(domain:www.production-expert.com)",
-      "Bash(.venv/Scripts/python.exe:*)"
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(.venv/bin/python:*)"
     ]
   }
 }

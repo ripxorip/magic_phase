@@ -2,11 +2,13 @@
 """Run a Magic Phase integration test and print a results table.
 
 Usage:
-    python run_test.py path/to/test.json        # Run with VST3 harness
-    python run_test.py path/to/test.json --py   # Run with Python DSP engine
-    python run_test.py path/to/test.json --no-plot  # Skip plot generation
+    python run_test.py path/to/test.json              # Run with VST3 harness
+    python run_test.py path/to/test.json --py         # Run with Python DSP engine
+    python run_test.py path/to/test.json --py --tree  # Spanning tree alignment
+    python run_test.py path/to/test.json --no-plot    # Skip plot generation
 
 The --py flag uses the Python DSP engine instead of the C++ VST3 harness.
+The --tree flag uses spanning tree alignment (auto reference, strongest pairs).
 Outputs go to results/<test_name>_py/ with the same structure (WAVs, plots,
 Reaper project) for direct comparison. Faster iteration for DSP prototyping.
 """
@@ -332,6 +334,454 @@ def run_python_engine(test_file: Path, out_dir: Path, result_file: Path,
     return True
 
 
+def run_python_tree_engine(test_file: Path, out_dir: Path, result_file: Path,
+                           analyze_window_s: float = 7.5, threshold: float = 0.15):
+    """Run alignment using Python DSP engine with spanning tree algorithm.
+
+    Uses all-pairs correlation matrix to build maximum spanning tree.
+    Root (reference) is auto-selected. Each track aligns to its tree parent.
+    """
+    import time
+    from align_files import (detect_delay_xcorr, correct_delay_subsample,
+                             analyze_phase_spectral, apply_phase_spectral,
+                             analyze_and_plot)
+    from graph_align import (compute_correlation_matrix, max_spanning_tree,
+                             select_root, build_directed_tree, compute_corrections,
+                             plot_alignment_overview)
+
+    test_def = json.loads(test_file.read_text())
+    test_name = test_file.stem
+    sr_config = test_def.get("sample_rate", 48000)
+    buffer_size = test_def.get("buffer_size", 64)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    t_start = time.perf_counter()
+
+    # Load ALL tracks (no reference/target distinction initially)
+    def load_mono(path):
+        audio, sr = sf.read(str(path))
+        if audio.ndim > 1:
+            audio = np.mean(audio, axis=1)
+        return audio, sr
+
+    track_defs = test_def["tracks"]
+    track_names = []
+    track_audios = []
+    track_paths = []
+
+    for td in track_defs:
+        tp = ROOT / td["file"]
+        ta, sr = load_mono(tp)
+        track_names.append(tp.stem)
+        track_audios.append(ta)
+        track_paths.append(tp)
+        print(f"  Loaded: {tp.name} ({len(ta)/sr:.2f}s @ {sr}Hz)")
+
+    N = len(track_audios)
+
+    # Common length across all tracks
+    common_len = min(len(t) for t in track_audios)
+    track_audios = [t[:common_len] for t in track_audios]
+
+    # Analysis window
+    analyze_samples = min(int(analyze_window_s * sr), common_len)
+    analyze_audios = [t[:analyze_samples] for t in track_audios]
+
+    t_load = time.perf_counter()
+    print(f"\n  Loaded {N} tracks in {(t_load - t_start)*1000:.0f}ms"
+          f" (common length: {common_len/sr:.2f}s)")
+    print(f"  Analysis window: {analyze_samples/sr:.1f}s ({analyze_samples} samples)")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STAGE 1: SPANNING TREE ALIGNMENT
+    # ═══════════════════════════════════════════════════════════════════════
+    print(f"\n{'═'*60}")
+    print(f"  SPANNING TREE ALIGNMENT (threshold={threshold})")
+    print(f"{'═'*60}")
+
+    # Compute all-pairs correlation matrix
+    print(f"\n  Computing {N}×{N} correlation matrix...")
+    t_corr_start = time.perf_counter()
+    corr_matrix, delay_matrix, polarity_matrix = compute_correlation_matrix(
+        analyze_audios, sr, max_delay_ms=50.0
+    )
+    t_corr = time.perf_counter() - t_corr_start
+    print(f"  Matrix computed in {t_corr*1000:.0f}ms")
+
+    # Print matrix
+    print(f"\n  Correlation Matrix:")
+    header = "         " + "".join(f"{n[:8]:>10}" for n in track_names)
+    print(f"  {header}")
+    for i, name in enumerate(track_names):
+        row = f"  {name[:8]:<8}"
+        for j in range(N):
+            if i == j:
+                row += "       ---"
+            else:
+                val = corr_matrix[i, j]
+                marker = "*" if val >= threshold else " "
+                row += f"    {val:.2f}{marker}"
+        print(row)
+
+    # Build spanning tree
+    print(f"\n  Building maximum spanning tree...")
+    tree_edges = max_spanning_tree(corr_matrix, threshold)
+    root = select_root(corr_matrix, threshold)
+    directed_tree = build_directed_tree(tree_edges, root, delay_matrix, polarity_matrix)
+    corrections = compute_corrections(directed_tree, root, N)
+
+    # Print row sums
+    print(f"\n  Row sums (correlations ≥{threshold}):")
+    row_sums = []
+    for i in range(N):
+        s = sum(corr_matrix[i, j] for j in range(N)
+                if i != j and corr_matrix[i, j] >= threshold)
+        row_sums.append((s, i))
+    row_sums.sort(reverse=True)
+    for s, i in row_sums:
+        marker = " ← ROOT" if i == root else (" ← ORPHAN" if corrections[i].is_orphan else "")
+        print(f"    {track_names[i]}: {s:.2f}{marker}")
+
+    # Print tree structure
+    print(f"\n  Tree structure:")
+    children = {i: [] for i in range(N)}
+    for child_idx, edge in directed_tree.items():
+        children[edge.parent].append((child_idx, edge))
+
+    def print_tree(idx, prefix="    ", is_last=True):
+        corr = corrections[idx]
+        if corr.parent_idx is None and not corr.is_orphan:
+            print(f"{prefix}{track_names[idx]} (ROOT, untouched)")
+        else:
+            edge = directed_tree.get(idx)
+            if edge:
+                delay_ms = edge.delay / sr * 1000
+                pol_str = ", INV" if edge.polarity < 0 else ""
+                print(f"{prefix}{track_names[idx]} ({edge.correlation:.2f}) "
+                      f"→ delay={edge.delay:+d} ({delay_ms:+.2f}ms){pol_str}")
+
+        child_list = children.get(idx, [])
+        for i, (child_idx, _) in enumerate(sorted(child_list)):
+            is_last_child = (i == len(child_list) - 1)
+            new_prefix = prefix + ("    " if is_last else "│   ")
+            connector = "└── " if is_last_child else "├── "
+            print_tree(child_idx, prefix + connector, is_last_child)
+
+    print_tree(root)
+
+    # Print orphans
+    for i in range(N):
+        if corrections[i].is_orphan:
+            print(f"    {track_names[i]} (ORPHAN, untouched)")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # STAGE 2: APPLY CORRECTIONS
+    # ═══════════════════════════════════════════════════════════════════════
+    print(f"\n{'═'*60}")
+    print(f"  APPLYING CORRECTIONS")
+    print(f"{'═'*60}")
+
+    # Process tracks in BFS order (parents before children)
+    corrected_audios = [None] * N
+    corrected_analyze = [None] * N
+    result_tracks = []
+
+    # Root is untouched
+    corrected_audios[root] = track_audios[root].copy()
+    corrected_analyze[root] = analyze_audios[root].copy()
+
+    # BFS order
+    from collections import deque
+    queue = deque([root])
+    process_order = []
+    visited = {root}
+
+    while queue:
+        idx = queue.popleft()
+        process_order.append(idx)
+        for child_idx in [c for c, _ in children.get(idx, [])]:
+            if child_idx not in visited:
+                visited.add(child_idx)
+                queue.append(child_idx)
+
+    # Add orphans
+    for i in range(N):
+        if corrections[i].is_orphan:
+            process_order.append(i)
+
+    # Process each track
+    for idx in process_order:
+        corr = corrections[idx]
+        name = track_names[idx]
+        mode = track_defs[idx].get("mode", "phi")
+
+        print(f"\n  {'-'*54}")
+        if idx == root:
+            print(f"  {name} (ROOT) - pass through")
+            print(f"  {'-'*54}")
+            result_tracks.append({
+                "name": name,
+                "role": "reference",
+                "input_file": track_defs[idx]["file"],
+                "output_file": str((out_dir / f"{name}_out.wav").resolve()),
+                "slot": idx,
+                "results": {
+                    "alignment_state": "ALIGNED",
+                    "delay_samples": 0.0,
+                    "delay_sub_sample": 0.0,
+                    "delay_ms": 0.0,
+                    "correlation": 1.0,
+                    "coherence": 1.0,
+                    "phase_degrees": 0.0,
+                    "polarity_inverted": False,
+                    "time_correction_on": False,
+                    "phase_correction_on": False,
+                    "is_root": True,
+                    "spectral_bands": [1.0] * 48,
+                }
+            })
+            continue
+        elif corr.is_orphan:
+            print(f"  {name} (ORPHAN) - pass through")
+            print(f"  {'-'*54}")
+            corrected_audios[idx] = track_audios[idx].copy()
+            corrected_analyze[idx] = analyze_audios[idx].copy()
+            result_tracks.append({
+                "name": name,
+                "role": "orphan",
+                "input_file": track_defs[idx]["file"],
+                "output_file": str((out_dir / f"{name}_out.wav").resolve()),
+                "slot": idx,
+                "results": {
+                    "alignment_state": "ORPHAN",
+                    "delay_samples": 0.0,
+                    "delay_sub_sample": 0.0,
+                    "delay_ms": 0.0,
+                    "correlation": 0.0,
+                    "coherence": 0.0,
+                    "phase_degrees": 0.0,
+                    "polarity_inverted": False,
+                    "time_correction_on": False,
+                    "phase_correction_on": False,
+                    "is_orphan": True,
+                    "spectral_bands": [0.0] * 48,
+                }
+            })
+            continue
+
+        # Get parent's corrected audio
+        parent_idx = corr.parent_idx
+        parent_audio = corrected_audios[parent_idx]
+        parent_analyze = corrected_analyze[parent_idx]
+        edge = directed_tree[idx]
+
+        print(f"  {name} → align to {track_names[parent_idx]} (corr={edge.correlation:.2f})")
+        print(f"  {'-'*54}")
+
+        # Recompute xcorr against CORRECTED parent (not raw!)
+        # The matrix delay was raw-vs-raw, but parent has been shifted
+        delay, recomputed_corr, polarity = detect_delay_xcorr(
+            parent_analyze, analyze_audios[idx], sr, max_delay_ms=50.0
+        )
+        delay_ms = delay / sr * 1000
+
+        print(f"    Delay:    {delay:+d} samples ({delay_ms:+.2f} ms)")
+        print(f"    Polarity: {'INVERTED' if polarity < 0 else 'Normal'}")
+        print(f"    (recomputed vs corrected parent, was {edge.delay:+d} vs raw)")
+
+        corrected = correct_delay_subsample(track_audios[idx], delay, sr)
+        corrected_ana = correct_delay_subsample(analyze_audios[idx], delay, sr)
+        if polarity < 0:
+            corrected = -corrected
+            corrected_ana = -corrected_ana
+
+        # Spectral phase correction
+        bands_48 = [0.0] * 48
+        phase_deg = 0.0
+        avg_coh = 0.0
+        phase_on = False
+        spectral_info = None
+
+        if mode == "phi":
+            t_phase = time.perf_counter()
+
+            # Analyze against CORRECTED parent
+            f_bins, phase_corr, coh = analyze_phase_spectral(
+                parent_analyze, corrected_ana, sr,
+                coherence_threshold=0.4, max_correction_deg=120
+            )
+            corrected = apply_phase_spectral(corrected, phase_corr, sr)
+            corrected = corrected[:common_len]
+
+            phase_on = True
+            t_phase_done = time.perf_counter()
+
+            # Metrics
+            mask20 = f_bins > 20
+            avg_coh = float(np.mean(coh[mask20]))
+            phase_deg = float(np.mean(np.abs(np.degrees(phase_corr[mask20]))))
+            spectral_info = (f_bins, phase_corr, coh)
+
+            # 48-band coherence
+            edges = np.logspace(np.log10(20), np.log10(sr/2), 49)
+            for b in range(48):
+                m = (f_bins >= edges[b]) & (f_bins < edges[b+1])
+                if np.any(m):
+                    bands_48[b] = float(np.mean(coh[m]))
+
+            print(f"    Phase:    {np.degrees(np.min(phase_corr)):.1f}° to "
+                  f"{np.degrees(np.max(phase_corr)):.1f}°")
+            print(f"    Coherence: {avg_coh:.3f}")
+            print(f"    (spectral: {(t_phase_done-t_phase)*1000:.0f}ms)")
+
+            # Per-region breakdown
+            print(f"\n    Coherence by region:")
+            regions = [
+                ("Sub/Bass", 20, 200),
+                ("Low-Mid",  200, 800),
+                ("Mid",      800, 2500),
+                ("Hi-Mid",   2500, 6000),
+                ("High",     6000, sr/2),
+            ]
+            for rname, lo, hi in regions:
+                m = (f_bins >= lo) & (f_bins < hi)
+                if np.any(m):
+                    rc = np.mean(coh[m])
+                    rp = np.mean(np.abs(np.degrees(phase_corr[m])))
+                    filled = int(rc * 20)
+                    bar = '#' * filled + '.' * (20 - filled)
+                    print(f"      {rname:>8}: {bar} {rc:.3f}  corr={rp:.1f}°")
+
+        corrected_audios[idx] = corrected[:common_len]
+        corrected_analyze[idx] = corrected_ana[:analyze_samples] if len(corrected_ana) >= analyze_samples else corrected_ana
+
+        # Quality: sum with parent
+        e_raw = np.sum((parent_audio + track_audios[idx][:common_len]) ** 2)
+        e_aligned = np.sum((parent_audio + corrected[:common_len]) ** 2)
+        gain_db = 10 * np.log10(e_aligned / (e_raw + 1e-20))
+        print(f"\n    Sum gain vs parent: {gain_db:+.1f} dB")
+
+        # Plot
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        title = f"{name} → {track_names[parent_idx]}" + (" + SPECTRAL" if phase_on else "")
+        fig = analyze_and_plot(parent_audio, track_audios[idx], corrected[:common_len],
+                               sr, title=title, spectral_info=spectral_info)
+        plot_path = out_dir / f"analysis_{name}.png"
+        fig.savefig(str(plot_path), dpi=150)
+        plt.close(fig)
+        print(f"    Analysis plot: {plot_path.name}")
+
+        result_tracks.append({
+            "name": name,
+            "role": "target",
+            "input_file": track_defs[idx]["file"],
+            "output_file": str((out_dir / f"{name}_out.wav").resolve()),
+            "slot": idx,
+            "mode": mode,
+            "parent": track_names[parent_idx],
+            "results": {
+                "alignment_state": "ALIGNED",
+                "delay_samples": float(delay),
+                "delay_sub_sample": float(delay),
+                "delay_ms": float(delay_ms),
+                "correlation": float(edge.correlation),
+                "coherence": float(avg_coh),
+                "phase_degrees": float(phase_deg),
+                "polarity_inverted": polarity < 0,
+                "time_correction_on": True,
+                "phase_correction_on": phase_on,
+                "spectral_bands": bands_48,
+            }
+        })
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # WRITE OUTPUTS
+    # ═══════════════════════════════════════════════════════════════════════
+    print(f"\n{'═'*60}")
+    print(f"  WRITING OUTPUTS")
+    print(f"{'═'*60}")
+
+    # Write individual tracks
+    for i in range(N):
+        out_path = out_dir / f"{track_names[i]}_out.wav"
+        sf.write(str(out_path), corrected_audios[i], sr)
+
+    # Sum files
+    raw_sum = np.sum(track_audios, axis=0)[:common_len]
+    aligned_sum = np.sum(corrected_audios, axis=0)
+
+    sf.write(str(out_dir / "raw_sum.wav"), raw_sum, sr)
+    sf.write(str(out_dir / "sum.wav"), aligned_sum, sr)
+
+    # Overall energy gain
+    total_e_raw = np.sum(raw_sum ** 2)
+    total_e_aligned = np.sum(aligned_sum ** 2)
+    total_gain = 10 * np.log10(total_e_aligned / (total_e_raw + 1e-20))
+
+    t_end = time.perf_counter()
+    print(f"\n  TOTAL sum energy gain: {total_gain:+.1f} dB")
+    print(f"  Processing time: {(t_end-t_load)*1000:.0f}ms")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # VISUALIZATIONS
+    # ═══════════════════════════════════════════════════════════════════════
+    print(f"\n  Generating tree visualizations...")
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    # Overview plot (matrix + tree)
+    fig = plot_alignment_overview(
+        corr_matrix, directed_tree, corrections, root, track_names,
+        threshold=threshold, output_path=out_dir / "tree_overview.png"
+    )
+    plt.close(fig)
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # RESULT JSON
+    # ═══════════════════════════════════════════════════════════════════════
+    result = {
+        "test": test_name,
+        "timestamp": datetime.now().astimezone().isoformat(),
+        "algorithm": "spanning_tree",
+        "config": {
+            "plugin_path": "Python DSP engine (spanning tree)",
+            "sample_rate": float(sr),
+            "buffer_size": buffer_size,
+            "plugin_loaded": True,
+            "num_instances": N,
+            "tree_threshold": threshold,
+        },
+        "tree": {
+            "root": track_names[root],
+            "root_idx": root,
+            "edges": [
+                {
+                    "parent": track_names[e.parent],
+                    "child": track_names[e.child],
+                    "correlation": e.correlation,
+                    "delay": e.delay,
+                    "polarity": e.polarity
+                }
+                for e in directed_tree.values()
+            ],
+            "orphans": [track_names[i] for i in range(N) if corrections[i].is_orphan],
+        },
+        "correlation_matrix": corr_matrix.tolist(),
+        "tracks": result_tracks,
+        "timing": {
+            "plugin_load_ms": (t_load - t_start) * 1000,
+            "correlation_matrix_ms": t_corr * 1000,
+            "total_ms": (t_end - t_start) * 1000,
+        },
+    }
+    result_file.write_text(json.dumps(result, indent=2))
+
+    return True
+
+
 # Paths
 ROOT = Path(__file__).parent.parent
 if platform.system() == "Windows":
@@ -342,14 +792,19 @@ DEFAULT_TEST = ROOT / "tests" / "integration" / "lfwh_sm57_vs_u87.json"
 
 
 def run(test_file: Path, generate_plot: bool = True, use_python: bool = False,
-        analyze_window: float = 7.5):
+        analyze_window: float = 7.5, use_tree: bool = False, tree_threshold: float = 0.15):
     if not test_file.exists():
         print(f"Test definition not found: {test_file}")
         return 1
 
-    # Output dir based on test name (+ _py suffix for Python engine)
+    # Output dir based on test name (+ _py/_tree suffix)
     test_name = test_file.stem
-    out_dir = ROOT / "results" / (f"{test_name}_py" if use_python else test_name)
+    if use_tree:
+        out_dir = ROOT / "results" / f"{test_name}_tree"
+    elif use_python:
+        out_dir = ROOT / "results" / f"{test_name}_py"
+    else:
+        out_dir = ROOT / "results" / test_name
     result_file = out_dir / "result.json"
 
     # Clean previous results to avoid stale/corrupt files
@@ -357,7 +812,12 @@ def run(test_file: Path, generate_plot: bool = True, use_python: bool = False,
         shutil.rmtree(out_dir)
         print(f"  Cleaned previous results: {out_dir}")
 
-    if use_python:
+    if use_tree:
+        # ── Spanning Tree Python engine ──
+        print(f"Running Spanning Tree alignment: {test_name}\n")
+        if not run_python_tree_engine(test_file, out_dir, result_file, analyze_window, tree_threshold):
+            return 1
+    elif use_python:
         # ── Python DSP engine ──
         print(f"Running Python DSP engine: {test_name}\n")
         if not run_python_engine(test_file, out_dir, result_file, analyze_window):
@@ -398,7 +858,12 @@ def run(test_file: Path, generate_plot: bool = True, use_python: bool = False,
 
     # Print table
     W = 66
-    engine_label = "Python DSP Engine" if use_python else "VST3 Integration Test"
+    if use_tree:
+        engine_label = "Spanning Tree Alignment"
+    elif use_python:
+        engine_label = "Python DSP Engine"
+    else:
+        engine_label = "VST3 Integration Test"
 
     print()
     print("=" * W)
@@ -407,6 +872,13 @@ def run(test_file: Path, generate_plot: bool = True, use_python: bool = False,
     print(f"  Test:    {result['test']}")
     print(f"  Config:  {int(result['config']['sample_rate'])} Hz / {int(result['config']['buffer_size'])} buf")
     print(f"  Tracks:  {len(targets)} target(s)")
+
+    # Tree-specific info
+    if "tree" in result:
+        tree_info = result["tree"]
+        print(f"  Root:    {tree_info['root']} (auto-selected)")
+        if tree_info.get("orphans"):
+            print(f"  Orphans: {', '.join(tree_info['orphans'])}")
 
     all_pass = True
 
@@ -530,8 +1002,13 @@ if __name__ == "__main__":
                         help="Skip generating analysis plots")
     parser.add_argument("--py", action="store_true",
                         help="Use Python DSP engine instead of VST3 harness (faster prototyping)")
+    parser.add_argument("--tree", action="store_true",
+                        help="Use spanning tree alignment (auto reference, strongest pairs)")
+    parser.add_argument("--threshold", type=float, default=0.15,
+                        help="Correlation threshold for tree edges (default: 0.15)")
     parser.add_argument("--analyze-window", type=float, default=7.5,
                         help="Analysis window in seconds (default: 7.5, matching C++ harness)")
     args = parser.parse_args()
     sys.exit(run(args.test_file, generate_plot=not args.no_plot, use_python=args.py,
-                 analyze_window=args.analyze_window))
+                 analyze_window=args.analyze_window, use_tree=args.tree,
+                 tree_threshold=args.threshold))

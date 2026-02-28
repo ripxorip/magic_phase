@@ -1,14 +1,10 @@
 {
   "name": "7sg_full_kit",
-  "description": "7sg drums - Full kit aligned to kick",
+  "description": "7sg drums - Full kit with all 8 mics, spanning tree alignment",
   "plugin_path": "build/lib/VST3/Magic Phase.vst3",
   "sample_rate": 48000,
   "buffer_size": 64,
   "tracks": [
-    {
-      "file": "input/7sg_drums/Kick.wav",
-      "role": "reference"
-    },
     {
       "file": "input/7sg_drums/Snare Top.wav",
       "role": "target",
@@ -16,6 +12,11 @@
     },
     {
       "file": "input/7sg_drums/Snare Bot.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/7sg_drums/Kick.wav",
       "role": "target",
       "mode": "phi"
     },
