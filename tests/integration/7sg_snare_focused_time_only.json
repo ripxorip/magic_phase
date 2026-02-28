@@ -6,21 +6,21 @@
   "buffer_size": 64,
   "tracks": [
     {
-      "file": "input/7sg_drums/snare top.wav",
+      "file": "input/7sg_drums/Snare Top.wav",
       "role": "reference"
     },
     {
-      "file": "input/7sg_drums/snare bot.wav",
+      "file": "input/7sg_drums/Snare Bot.wav",
       "role": "target",
       "mode": "t"
     },
     {
-      "file": "input/7sg_drums/overhead left.wav",
+      "file": "input/7sg_drums/Overhead Left.wav",
       "role": "target",
       "mode": "t"
     },
     {
-      "file": "input/7sg_drums/overhead right.wav",
+      "file": "input/7sg_drums/Overhead Right.wav",
       "role": "target",
       "mode": "t"
     }

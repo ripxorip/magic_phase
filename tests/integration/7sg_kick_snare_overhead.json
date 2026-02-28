@@ -1,13 +1,18 @@
 {
-  "name": "7sg_snare_focused",
-  "description": "7sg drums - Overheads and snare bot aligned to snare top",
+  "name": "7sg_kick_snare_overhead",
+  "description": "7sg drums - Kick, snare bot, overheads aligned to snare top",
   "plugin_path": "build/lib/VST3/Magic Phase.vst3",
   "sample_rate": 48000,
   "buffer_size": 64,
   "tracks": [
     {
-      "file": "input/7sg_drums/Snare Top.wav",
+      "file": "input/7sg_drums/Kick.wav",
       "role": "reference"
+    },
+    {
+      "file": "input/7sg_drums/Snare Top.wav",
+      "role": "target",
+      "mode": "phi"
     },
     {
       "file": "input/7sg_drums/Snare Bot.wav",

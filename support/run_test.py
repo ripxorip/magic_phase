@@ -17,6 +17,9 @@ from pathlib import Path
 
 # Import plotting (same directory)
 from plot_test_results import main as generate_plots
+from create_reaper_project import create_rpp
+
+import shutil
 
 import numpy as np
 import soundfile as sf
@@ -82,6 +85,11 @@ def run(test_file: Path, generate_plot: bool = True):
     test_name = test_file.stem
     out_dir = ROOT / "results" / test_name
     result_file = out_dir / "result.json"
+
+    # Clean previous results to avoid stale/corrupt files
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+        print(f"  Cleaned previous results: {out_dir}")
 
     # Run harness
     cmd = [str(HARNESS), "--test", str(test_file), "--output-dir", str(out_dir), "--result", str(result_file)]
@@ -188,6 +196,14 @@ def run(test_file: Path, generate_plot: bool = True):
     # Create normalized audio for easy listening
     print("\nCreating normalized audio for A/B listening...")
     create_normalized_audio(out_dir)
+
+    # Generate Reaper project for A/B listening
+    print("\nCreating Reaper project...")
+    try:
+        rpp_path = create_rpp(out_dir)
+        print(f"  Reaper project: {rpp_path}")
+    except Exception as e:
+        print(f"  Warning: Could not create Reaper project: {e}")
 
     return 0 if all_pass else 1
 

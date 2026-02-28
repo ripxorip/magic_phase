@@ -6,41 +6,41 @@
   "buffer_size": 64,
   "tracks": [
     {
-      "file": "input/7sg_drums/kick.wav",
+      "file": "input/7sg_drums/Kick.wav",
       "role": "reference"
     },
     {
-      "file": "input/7sg_drums/snare top.wav",
+      "file": "input/7sg_drums/Snare Top.wav",
       "role": "target",
       "mode": "phi"
     },
     {
-      "file": "input/7sg_drums/snare bot.wav",
+      "file": "input/7sg_drums/Snare Bot.wav",
       "role": "target",
       "mode": "phi"
     },
     {
-      "file": "input/7sg_drums/overhead left.wav",
+      "file": "input/7sg_drums/Overhead Left.wav",
       "role": "target",
       "mode": "phi"
     },
     {
-      "file": "input/7sg_drums/overhead right.wav",
+      "file": "input/7sg_drums/Overhead Right.wav",
       "role": "target",
       "mode": "phi"
     },
     {
-      "file": "input/7sg_drums/tom l.wav",
+      "file": "input/7sg_drums/Tom Floor L.wav",
       "role": "target",
       "mode": "phi"
     },
     {
-      "file": "input/7sg_drums/tom c.wav",
+      "file": "input/7sg_drums/Tom Floor C.wav",
       "role": "target",
       "mode": "phi"
     },
     {
-      "file": "input/7sg_drums/tom r.wav",
+      "file": "input/7sg_drums/Tom Floor R.wav",
       "role": "target",
       "mode": "phi"
     }
