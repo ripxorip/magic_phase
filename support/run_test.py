@@ -82,7 +82,8 @@ def run_python_engine(test_file: Path, out_dir: Path, result_file: Path,
     """
     import time
     from align_files import (detect_delay_xcorr, correct_delay_subsample,
-                             analyze_phase_spectral, apply_phase_spectral)
+                             analyze_phase_spectral, apply_phase_spectral,
+                             analyze_and_plot)
 
     test_def = json.loads(test_file.read_text())
     test_name = test_file.stem
@@ -189,6 +190,7 @@ def run_python_engine(test_file: Path, out_dir: Path, result_file: Path,
         phase_deg = 0.0
         avg_coh = 0.0
         phase_on = False
+        spectral_info = None
 
         if mode == "phi":
             t2 = time.perf_counter()
@@ -208,6 +210,8 @@ def run_python_engine(test_file: Path, out_dir: Path, result_file: Path,
             mask20 = f_bins > 20
             avg_coh = float(np.mean(coh[mask20]))
             phase_deg = float(np.mean(np.abs(np.degrees(phase_corr[mask20]))))
+
+            spectral_info = (f_bins, phase_corr, coh)
 
             # 48-band coherence for result (matches C++ GUI bands)
             edges = np.logspace(np.log10(20), np.log10(sr/2), 49)
@@ -252,6 +256,18 @@ def run_python_engine(test_file: Path, out_dir: Path, result_file: Path,
         # ── Write output ──
         out_path = out_dir / f"{track_name}_out.wav"
         sf.write(str(out_path), corrected[:common_len], sr)
+
+        # ── Analysis plot (align_files.py style with correction curve) ──
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        title = f"Phase Alignment: {track_name}" + (" + SPECTRAL" if phase_on else "")
+        fig = analyze_and_plot(ref_audio, tar, corrected[:common_len], sr,
+                               title=title, spectral_info=spectral_info)
+        plot_path = out_dir / f"analysis_{track_name}.png"
+        fig.savefig(str(plot_path), dpi=150)
+        plt.close(fig)
+        print(f"    Analysis plot: {plot_path.name}")
 
         # ── Result entry ──
         result_tracks.append({
