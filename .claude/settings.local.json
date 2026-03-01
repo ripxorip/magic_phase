@@ -39,7 +39,8 @@
       "Bash(python3:*)",
       "WebFetch(domain:www.production-expert.com)",
       "Bash(.venv/Scripts/python.exe:*)",
-      "Bash(.venv/bin/python:*)"
+      "Bash(.venv/bin/python:*)",
+      "Bash(PYTHONUTF8=1 .venv/Scripts/python.exe:*)"
     ]
   }
 }

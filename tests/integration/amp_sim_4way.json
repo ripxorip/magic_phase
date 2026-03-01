@@ -1,0 +1,32 @@
+{
+  "name": "amp_sim_4way",
+  "description": "Amp sim alignment: DI + Guitar Rig + NAM + Neural DSP (same source, different amp sims)",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
+  "sample_rate": 44100,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/amp_sim/di.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/amp_sim/guitar_rig.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/amp_sim/nam.wav",
+      "role": "target",
+      "mode": "phi"
+    },
+    {
+      "file": "input/amp_sim/neural_dsp.wav",
+      "role": "target",
+      "mode": "phi"
+    }
+  ],
+  "expected": {
+    "alignment_state": "ALIGNED"
+  }
+}
