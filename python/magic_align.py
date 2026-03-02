@@ -12,6 +12,7 @@ See docs/MAGIC_ALIGN_ALGORITHM.md for the full spec.
 import numpy as np
 from scipy import signal as sp_signal
 from scipy.signal import find_peaks, butter, sosfilt
+from scipy.fft import fft, ifft, fftfreq
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 from dataclasses import dataclass
@@ -257,6 +258,42 @@ def detect_transients(audio: np.ndarray, sr: int,
     return np.array(onsets, dtype=int)
 
 
+def cluster_values(values: List[float], tolerance: float = 0.5
+                   ) -> Tuple[List[float], List[int]]:
+    """Find the largest cluster of values that are within tolerance of their neighbors.
+
+    Sorts values, walks through grouping consecutive values where the gap
+    between neighbors is <= tolerance. Returns the largest group's values
+    and their original indices.
+
+    Args:
+        values: list of float values to cluster
+        tolerance: max gap between consecutive sorted values to be in same cluster
+
+    Returns:
+        (cluster_values, cluster_original_indices)
+    """
+    if not values:
+        return [], []
+
+    indexed = sorted(enumerate(values), key=lambda x: x[1])
+
+    # Walk sorted values, split into groups at gaps > tolerance
+    groups: List[List[Tuple[int, float]]] = [[indexed[0]]]
+    for k in range(1, len(indexed)):
+        if indexed[k][1] - indexed[k-1][1] <= tolerance:
+            groups[-1].append(indexed[k])
+        else:
+            groups.append([indexed[k]])
+
+    # Largest group wins
+    best = max(groups, key=len)
+    cluster_vals = [v for _, v in best]
+    cluster_idxs = [i for i, _ in best]
+
+    return cluster_vals, cluster_idxs
+
+
 @dataclass
 class PeakXCorrResult:
     """Per-peak cross-correlation result."""
@@ -340,11 +377,24 @@ def windowed_xcorr_pair(audio_a: np.ndarray, audio_b: np.ndarray,
     if not corrs:
         return 0.0, 0.0, 1, ([] if return_detail else None)
 
-    mean_delay = float(np.mean(delays))
-    mean_corr = float(np.mean(corrs))
-    dominant_pol = 1 if sum(pols) >= 0 else -1
+    # Cluster delays: find the dominant group of consistent measurements
+    # tolerance = 0.5ms in samples (e.g. 24 samples at 48kHz)
+    delays_ms = [d / sr * 1000 for d in delays]
+    cluster_vals, cluster_idxs = cluster_values(delays_ms, tolerance=0.5)
 
-    return mean_delay, mean_corr, dominant_pol, detail
+    if cluster_vals:
+        cluster_delay_ms = float(np.mean(cluster_vals))
+        cluster_delay = cluster_delay_ms * sr / 1000
+        cluster_corrs = [corrs[i] for i in cluster_idxs]
+        cluster_pols = [pols[i] for i in cluster_idxs]
+        mean_corr = float(np.mean(cluster_corrs))
+        dominant_pol = 1 if sum(cluster_pols) >= 0 else -1
+    else:
+        cluster_delay = float(np.mean(delays))
+        mean_corr = float(np.mean(corrs))
+        dominant_pol = 1 if sum(pols) >= 0 else -1
+
+    return cluster_delay, mean_corr, dominant_pol, detail
 
 
 def compute_windowed_xcorr_matrix(
@@ -378,10 +428,274 @@ def compute_windowed_xcorr_matrix(
     return corr_matrix, delay_matrix, polarity_matrix
 
 
+# =============================================================================
+# ROBUST POLARITY DETECTION — Transient-windowed GCC-PHAT + dot-product voting
+# =============================================================================
+
+@dataclass
+class PolarityVote:
+    """Single transient window polarity vote."""
+    peak_sample: int
+    delay_samples: float
+    dot_product: float        # normalized dot product after alignment (-1 to +1)
+    gcc_sharpness: float      # peak sharpness of GCC-PHAT
+    band: str                 # 'broadband' or band label
+
+
+@dataclass
+class PolarityResult:
+    """Result of robust polarity detection."""
+    polarity: int             # +1 or -1
+    confidence: float         # 0.0 to 1.0
+    n_votes: int              # number of valid votes
+    n_agree: int              # number that agree with majority
+    votes: List[PolarityVote]
+
+
+def _gcc_phat(ref_win: np.ndarray, tar_win: np.ndarray,
+              max_lag: int) -> Tuple[float, float]:
+    """GCC-PHAT delay estimation for a single window.
+
+    Returns:
+        (delay_samples, peak_sharpness)
+        peak_sharpness = peak_value / median_value (how sharp the peak is)
+    """
+    n = len(ref_win)
+    nfft = 1 << (2 * n - 1).bit_length()  # next power of 2
+
+    R = fft(ref_win, n=nfft)
+    T = fft(tar_win, n=nfft)
+
+    # Cross-power spectrum, whitened
+    cross = T * np.conj(R)
+    magnitude = np.abs(cross)
+    magnitude[magnitude < 1e-20] = 1e-20
+    gcc = np.real(ifft(cross / magnitude))
+
+    # Restrict to allowed lag range
+    # gcc[0..max_lag] = positive lags, gcc[-max_lag..] = negative lags
+    valid_pos = gcc[:max_lag + 1]
+    valid_neg = gcc[-(max_lag):]  # last max_lag samples
+    valid = np.concatenate([valid_neg, valid_pos])
+    lags = np.arange(-max_lag, max_lag + 1)
+
+    peak_idx = np.argmax(valid)
+    delay = float(lags[peak_idx])
+
+    # Peak sharpness: ratio of peak to median
+    peak_val = valid[peak_idx]
+    median_val = np.median(np.abs(valid)) + 1e-20
+    sharpness = float(peak_val / median_val)
+
+    return delay, sharpness
+
+
+def detect_polarity_robust(
+    reference: np.ndarray,
+    target: np.ndarray,
+    sr: int,
+    peaks: np.ndarray,
+    delay_hint: float = 0.0,
+    max_refine_ms: float = 5.0,
+    window_pre_ms: float = 2.0,
+    window_post_ms: float = 12.0,
+    confidence_threshold: float = 0.2,
+    bandpass_range: Tuple[float, float] = (80.0, 3000.0),
+    verbose: bool = False,
+) -> PolarityResult:
+    """Robust polarity detection using transient-windowed GCC-PHAT + dot-product voting.
+
+    Algorithm:
+        1. Pre-shift target by delay_hint (known delay from broadband/windowed XCorr)
+        2. For each transient onset, extract a short window [-pre, +post] ms
+        3. Bandpass filter both windows (80-3000 Hz by default)
+        4. GCC-PHAT to refine delay within ±max_refine_ms
+        5. Shift target window by refined delay
+        6. Normalized dot product → polarity vote
+        7. Weight each vote by |dot_product| * gcc_sharpness
+        8. Aggregate weighted votes → final polarity + confidence
+
+    Args:
+        reference: reference audio signal
+        target: target audio signal
+        sr: sample rate
+        peaks: transient onset indices (in reference track's timeline)
+        delay_hint: known delay in samples (target lags reference by this amount)
+        max_refine_ms: GCC-PHAT refinement range in ms (small, since delay_hint is close)
+        window_pre_ms: window start before onset (ms)
+        window_post_ms: window end after onset (ms)
+        confidence_threshold: minimum |dot_product| to count a vote
+        bandpass_range: (low_hz, high_hz) for bandpass filter
+        verbose: print per-vote details
+
+    Returns:
+        PolarityResult with polarity, confidence, and vote details
+    """
+    if len(peaks) == 0:
+        return PolarityResult(polarity=1, confidence=0.0, n_votes=0,
+                              n_agree=0, votes=[])
+
+    max_refine_lag = int(max_refine_ms * sr / 1000)
+    pre_samples = int(window_pre_ms * sr / 1000)
+    post_samples = int(window_post_ms * sr / 1000)
+    delay_hint_int = int(round(delay_hint))
+    audio_len = min(len(reference), len(target))
+
+    # Bandpass filter (applied to full signal once, not per window)
+    lo, hi = bandpass_range
+    sos = butter(3, [lo, hi], btype='bandpass', fs=sr, output='sos')
+    ref_bp = sosfilt(sos, reference)
+    tar_bp = sosfilt(sos, target)
+
+    votes: List[PolarityVote] = []
+
+    for peak in peaks:
+        # Window in reference timeline
+        ref_start = peak - pre_samples
+        ref_end = peak + post_samples
+        # Corresponding window in target, shifted by delay hint
+        tar_start = ref_start + delay_hint_int
+        tar_end = ref_end + delay_hint_int
+
+        # Expand target window by refine range for GCC-PHAT search
+        tar_start_exp = tar_start - max_refine_lag
+        tar_end_exp = tar_end + max_refine_lag
+
+        if ref_start < 0 or ref_end >= audio_len:
+            continue
+        if tar_start_exp < 0 or tar_end_exp >= audio_len:
+            continue
+
+        ref_win = ref_bp[ref_start:ref_end].copy()
+        tar_win_exp = tar_bp[tar_start_exp:tar_end_exp].copy()
+
+        # Skip if either window is too quiet
+        ref_rms = np.sqrt(np.mean(ref_win ** 2))
+        tar_rms = np.sqrt(np.mean(tar_win_exp ** 2))
+        if ref_rms < 1e-8 or tar_rms < 1e-8:
+            continue
+
+        # GCC-PHAT to refine delay within expanded target window
+        refine_delay, sharpness = _gcc_phat(ref_win, tar_win_exp, max_refine_lag)
+
+        # Extract aligned target window using refined delay
+        # The expanded window is centered on delay_hint, so refine_delay is
+        # the residual offset from center
+        center_offset = max_refine_lag  # tar_win_exp[center_offset] = tar_bp[tar_start]
+        align_start = center_offset + int(round(refine_delay))
+        align_end = align_start + len(ref_win)
+
+        if align_start < 0 or align_end > len(tar_win_exp):
+            continue
+
+        aligned_tar = tar_win_exp[align_start:align_end]
+        aligned_ref = ref_win
+
+        if len(aligned_ref) < pre_samples or len(aligned_tar) < pre_samples:
+            continue
+
+        # Normalized dot product
+        norm_ref = np.sqrt(np.sum(aligned_ref ** 2))
+        norm_tar = np.sqrt(np.sum(aligned_tar ** 2))
+        if norm_ref < 1e-10 or norm_tar < 1e-10:
+            continue
+
+        dot = float(np.sum(aligned_ref * aligned_tar) / (norm_ref * norm_tar))
+
+        total_delay = delay_hint + refine_delay
+        votes.append(PolarityVote(
+            peak_sample=int(peak),
+            delay_samples=total_delay,
+            dot_product=dot,
+            gcc_sharpness=sharpness,
+            band='broadband',
+        ))
+
+    # Filter votes by confidence threshold
+    valid_votes = [v for v in votes if abs(v.dot_product) >= confidence_threshold]
+
+    if not valid_votes:
+        # Fall back to all votes if none pass threshold
+        if votes:
+            valid_votes = votes
+        else:
+            return PolarityResult(polarity=1, confidence=0.0, n_votes=0,
+                                  n_agree=0, votes=[])
+
+    # Weighted vote: weight = |dot_product| * gcc_sharpness
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for v in valid_votes:
+        weight = abs(v.dot_product) * max(v.gcc_sharpness, 0.1)
+        weighted_sum += np.sign(v.dot_product) * weight
+        total_weight += weight
+
+    final_polarity = 1 if weighted_sum >= 0 else -1
+
+    # Confidence: fraction of weight that agrees with majority
+    agree_weight = 0.0
+    n_agree = 0
+    for v in valid_votes:
+        if np.sign(v.dot_product) == final_polarity:
+            agree_weight += abs(v.dot_product) * max(v.gcc_sharpness, 0.1)
+            n_agree += 1
+    confidence = float(agree_weight / (total_weight + 1e-20))
+
+    if verbose:
+        print(f"    Polarity votes: {len(valid_votes)} valid / {len(votes)} total, "
+              f"pol={'INV' if final_polarity < 0 else 'NORMAL'}, "
+              f"confidence={confidence:.2f} ({n_agree}/{len(valid_votes)} agree)")
+
+    return PolarityResult(
+        polarity=final_polarity,
+        confidence=confidence,
+        n_votes=len(valid_votes),
+        n_agree=n_agree,
+        votes=votes,
+    )
+
+
+def compute_polarity_matrix(
+    audios: List[np.ndarray],
+    sr: int,
+    all_peaks: List[np.ndarray],
+    delay_matrix: np.ndarray,
+    verbose: bool = False,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute N×N robust polarity matrix using transient-windowed GCC-PHAT.
+
+    Uses delay_matrix values as delay hints so GCC-PHAT only needs to
+    refine within a small range (works for close mics AND room mics).
+
+    Returns:
+        polarity_matrix: N×N polarity values (+1 or -1)
+        confidence_matrix: N×N confidence values (0.0 to 1.0)
+    """
+    N = len(audios)
+    pol_matrix = np.ones((N, N), dtype=int)
+    conf_matrix = np.zeros((N, N))
+
+    for i in range(N):
+        for j in range(i + 1, N):
+            # Use peaks from the reference track (i)
+            # delay_matrix[i,j] = how much j lags i (in samples)
+            result = detect_polarity_robust(
+                audios[i], audios[j], sr, all_peaks[i],
+                delay_hint=float(delay_matrix[i, j]),
+                verbose=verbose,
+            )
+            pol_matrix[i, j] = result.polarity
+            pol_matrix[j, i] = result.polarity
+            conf_matrix[i, j] = result.confidence
+            conf_matrix[j, i] = result.confidence
+
+    return pol_matrix, conf_matrix
+
+
 @dataclass
 class PeakMatchResult:
     """Result of peak-matching between two tracks."""
-    delay_ms: float         # consensus delay (mode of histogram)
+    delay_ms: float         # consensus delay (mean of largest cluster)
     confidence: float       # fraction of peaks that agree (0-1)
     n_matched: int          # number of peaks in the winning bin
     n_total: int            # total peak pairs considered
@@ -390,12 +704,12 @@ class PeakMatchResult:
 
 def peak_match_pair(peaks_a: np.ndarray, peaks_b: np.ndarray,
                     sr: int, max_dist_ms: float = 20.0) -> PeakMatchResult:
-    """Match peaks between two tracks via histogram voting.
+    """Match peaks between two tracks via cluster voting.
 
     For each peak in A, find the closest peak in B (signed distance).
     Ignore pairs further than max_dist_ms (not a real match).
-    Histogram-vote on the distances. The mode = consensus delay.
-    Confidence = how many of A's peaks agree / total A peaks.
+    Cluster the distances (0.5ms tolerance), largest cluster = consensus delay.
+    Confidence = cluster size / total A peaks.
 
     Direction matters: A is the track being aligned, B is the reference.
     "How many of A's onsets can we find in B at a consistent delay?"
@@ -421,25 +735,10 @@ def peak_match_pair(peaks_a: np.ndarray, peaks_b: np.ndarray,
     if not dists_ms:
         return PeakMatchResult(0.0, 0.0, 0, 0, [])
 
-    # Sliding-window density clustering
-    # Sort distances, slide a window, find the densest cluster.
-    # Median of cluster = delay at sample resolution.
-    # 3ms window: covers onset-detection jitter across different instruments
-    # (same-instrument pairs will cluster tighter, different instruments wider)
-    window_ms = 3.0
-    sorted_d = np.sort(dists_ms)
-    best_count = 0
-    best_start = 0
-    for i in range(len(sorted_d)):
-        # count how many distances fall within [sorted_d[i], sorted_d[i] + window_ms]
-        j = np.searchsorted(sorted_d, sorted_d[i] + window_ms, side='right')
-        count = j - i
-        if count > best_count:
-            best_count = count
-            best_start = i
-
-    cluster = sorted_d[best_start:best_start + best_count]
-    delay = float(np.median(cluster))
+    # Cluster the distances: group values within 0.5ms of each other
+    cluster_vals, cluster_idxs = cluster_values(dists_ms, tolerance=0.5)
+    delay = float(np.mean(cluster_vals)) if cluster_vals else 0.0
+    best_count = len(cluster_vals)
 
     # Confidence = cluster size / total A-peaks
     # "What fraction of my onsets found a consistent match?"
@@ -458,7 +757,7 @@ def compute_peak_distance_matrix(
     all_peaks_per_track: List[np.ndarray],
     sr: int
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Compute N*N peak-match matrices via histogram voting.
+    """Compute N*N peak-match matrices via cluster voting.
 
     Returns:
         delay_matrix: consensus delay in ms (signed, [i,j] = how much j lags i)
@@ -802,6 +1101,47 @@ def plot_delay_matrix(
     return fig
 
 
+def plot_lens_overview(
+    broadband_corr: np.ndarray,
+    broadband_delay_ms: np.ndarray,
+    envelope_corr: np.ndarray,
+    envelope_delay_ms: np.ndarray,
+    windowed_corr: np.ndarray,
+    windowed_delay_ms: np.ndarray,
+    peak_conf: np.ndarray,
+    peak_delay_ms: np.ndarray,
+    track_names: List[str],
+    output_path: Optional[Path] = None
+) -> plt.Figure:
+    """4x2 overview of all lenses: top row = delays, bottom row = confidence/correlation."""
+    fig, axes = plt.subplots(2, 4, figsize=(22, 10))
+    fig.suptitle('Alignment Lenses Overview', fontsize=16, fontweight='bold', y=0.98)
+
+    # Top row: delays
+    plot_delay_matrix(broadband_delay_ms, track_names, ax=axes[0, 0], title='Broadband Delay')
+    plot_delay_matrix(envelope_delay_ms, track_names, ax=axes[0, 1], title='Envelope Delay')
+    plot_delay_matrix(windowed_delay_ms, track_names, ax=axes[0, 2], title='Windowed Delay')
+    plot_delay_matrix(peak_delay_ms, track_names, ax=axes[0, 3], title='Peak-Match Delay')
+
+    # Bottom row: correlation / confidence
+    plot_correlation_matrix(broadband_corr, track_names, ax=axes[1, 0],
+                            title='Broadband Corr', full_scale=True)
+    plot_correlation_matrix(envelope_corr, track_names, ax=axes[1, 1],
+                            title='Envelope Corr', full_scale=True)
+    plot_correlation_matrix(windowed_corr, track_names, ax=axes[1, 2],
+                            title='Windowed Corr', full_scale=True)
+    plot_correlation_matrix(peak_conf, track_names, ax=axes[1, 3],
+                            title='Peak-Match Conf', full_scale=True)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+    if output_path:
+        fig.savefig(str(output_path), dpi=150, bbox_inches='tight')
+        print(f"  Saved: {output_path}")
+
+    return fig
+
+
 def plot_triple_delays(
     broadband_delay_ms: np.ndarray,
     envelope_delay_ms: np.ndarray,
@@ -1054,6 +1394,10 @@ def magic_align(
         all_peaks.append(peaks)
         if verbose:
             print(f"    {track_names[i]}: {len(peaks)} peaks")
+
+    # Note: Polarity is determined empirically in the correction loop
+    # (try both, keep whichever sums better). bb_pol from broadband XCorr
+    # is kept in the plan for informational display only.
 
     # Step 5: Bridge orphans
     if verbose:

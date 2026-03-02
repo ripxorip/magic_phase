@@ -369,7 +369,8 @@ def run_python_magic_engine(test_file: Path, out_dir: Path, result_file: Path,
                              compute_peak_distance_matrix, plot_peak_match_matrix,
                              plot_detected_peaks, plot_correlation_matrix,
                              plot_triple_xcorr, plot_delay_matrix, plot_triple_delays,
-                             plot_peak_detail, plot_cluster_overview)
+                             plot_peak_detail, plot_cluster_overview,
+                             plot_lens_overview)
 
     test_def = json.loads(test_file.read_text())
     test_name = test_file.stem
@@ -503,16 +504,25 @@ def run_python_magic_engine(test_file: Path, out_dir: Path, result_file: Path,
             print(f"  {'-'*54}")
 
             # Recompute xcorr vs cluster root (fresh, not from matrix)
-            delay, recomputed_corr, polarity = detect_delay_xcorr(
+            delay, recomputed_corr, _xcorr_pol = detect_delay_xcorr(
                 root_analyze, analyze_audios[idx], sr, max_delay_ms=50.0
             )
             delay_ms = delay / sr * 1000
 
-            print(f"    Delay:    {delay:+d} samples ({delay_ms:+.2f} ms)")
-            print(f"    Polarity: {'INVERTED' if polarity < 0 else 'Normal'}")
-
+            # Time-align
             corrected = correct_delay_subsample(track_audios[idx], delay, sr)
             corrected_ana = correct_delay_subsample(analyze_audios[idx], delay, sr)
+
+            # Empirical polarity: try both, keep whichever sums better with root
+            rms_normal = np.sqrt(np.mean((root_analyze + corrected_ana[:len(root_analyze)]) ** 2))
+            rms_inv = np.sqrt(np.mean((root_analyze - corrected_ana[:len(root_analyze)]) ** 2))
+            polarity = 1 if rms_normal >= rms_inv else -1
+
+            print(f"    Delay:    {delay:+d} samples ({delay_ms:+.2f} ms)")
+            print(f"    Polarity: {'INVERTED' if polarity < 0 else 'Normal'} "
+                  f"(empirical: normal={20*np.log10(rms_normal+1e-20):+.1f}dB, "
+                  f"inv={20*np.log10(rms_inv+1e-20):+.1f}dB)")
+
             if polarity < 0:
                 corrected = -corrected
                 corrected_ana = -corrected_ana
@@ -834,6 +844,16 @@ def run_python_magic_engine(test_file: Path, out_dir: Path, result_file: Path,
     fig_triple = plot_triple_xcorr(broadband_matrix, env_corr_matrix, win_corr_matrix,
                                     track_names, output_path=out_dir / "xcorr_triple.png")
     plt.close(fig_triple)
+
+    # 4x2 lens overview: all delays + all correlations/confidences
+    fig_overview = plot_lens_overview(
+        broadband_matrix, broadband_delay_ms,
+        env_corr_matrix, env_delay_ms,
+        win_corr_matrix, win_delay_ms,
+        peak_conf_matrix, peak_delay_matrix,
+        track_names, output_path=out_dir / "lens_overview.png"
+    )
+    plt.close(fig_overview)
 
     # ═══════════════════════════════════════════════════════════════════════
     # PER-PEAK DETAIL for interesting pairs

@@ -1,0 +1,30 @@
+{
+  "name": "lfwh_3way_magic",
+  "description": "3-way test: U87 + SM57 front + SM57 back - cluster+star auto-alignment (no reference)",
+  "plugin_path": "build/lib/VST3/Magic Phase.vst3",
+  "sample_rate": 48000,
+  "buffer_size": 64,
+  "tracks": [
+    {
+      "file": "input/lfwh_u87.wav",
+      "role": "target",
+      "mode": "phi",
+      "gain": 1.0
+    },
+    {
+      "file": "input/lfwh_sm57_front.wav",
+      "role": "target",
+      "mode": "phi",
+      "gain": 1.0
+    },
+    {
+      "file": "input/lfwh_sm57_back.wav",
+      "role": "target",
+      "mode": "phi",
+      "gain": 1.5
+    }
+  ],
+  "expected": {
+    "alignment_state": "ALIGNED"
+  }
+}
